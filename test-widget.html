@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Widget Test Page</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #f0f2f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .card {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            text-align: center;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Welcome to My Website</h1>
+        <p>This is a test page for the WhatsApp Multi-Agent Chat Widget.</p>
+        <p>Look at the bottom right corner of the screen! ↘️</p>
+    </div>
+
+    <!-- ── WhatsApp Widget Config ──────────────────────────── -->
+    <script>
+        window.WA_WIDGET_API_URL = 'http://localhost:8001';
+        window.WA_WIDGET_API_KEY = 'sk_replace_with_real_key_from_dashboard';
+    </script>
+    
+    <!-- ── WhatsApp Widget Loader ──────────────────────────── -->
+    <!-- In real production, point this to your CDN or hosted public file -->
+    <script src="frontend/public/widget.js"></script>
+</body>
+</html>
