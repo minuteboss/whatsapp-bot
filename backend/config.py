@@ -9,7 +9,10 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # ── Database ──────────────────────────────────────────────
-    DATABASE_URL: str = "mssql+aioodbc://sa:YourPassword@localhost:1433/whatsapp_support?driver=ODBC+Driver+17+for+SQL+Server"
+    DATABASE_URL: str = "sqlite+aiosqlite:///./support.db"
+
+    # ── Environment ───────────────────────────────────────────
+    ENVIRONMENT: str = "development"
     
     # ── JWT ───────────────────────────────────────────────────
     JWT_SECRET: str = "change-me-in-production-use-a-long-random-string"
@@ -30,6 +33,7 @@ class Settings(BaseSettings):
     # ── Rate Limiting ─────────────────────────────────────────
     RATE_LIMIT_API: str = "500/15minutes"
     RATE_LIMIT_WEBHOOK: str = "1000/minute"
+    RATE_LIMIT_AUTH: str = "10/minute"
 
     @property
     def cors_origins_list(self) -> list[str]:

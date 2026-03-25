@@ -16,12 +16,13 @@ from sqlalchemy import select
 
 from config import settings
 from database import engine, Base, async_session
-from models import Agent, Setting, CannedResponse
-from middleware.auth import hash_password, decode_token
+from models import Tenant, Agent, Setting, CannedResponse
+from middleware.auth import hash_password, decode_token, validate_ws_ticket
 from services.websocket_manager import ws_manager
 
 # ── Routers ───────────────────────────────────────────────────
 from routers import auth, agents, conversations, widget, webhook, admin
+from routers import superadmin
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,15 +33,31 @@ limiter = Limiter(key_func=get_remote_address)
 
 # ── Seed Data ─────────────────────────────────────────────────
 async def seed_data():
-    """Insert seed data on first boot."""
+    """Insert seed data on first boot — creates default tenant, admin, canned, settings."""
     async with async_session() as db:
         try:
-            result = await db.execute(select(Agent).limit(1))
+            # Check if already seeded
+            result = await db.execute(select(Tenant).limit(1))
             if result.scalar_one_or_none() is not None:
-                return  # Data already seeded
+                return
 
+            # 1. Create default tenant
+            widget_key = f"wk_{secrets.token_hex(24)}"
+            default_tenant = Tenant(
+                name="Default",
+                slug="default",
+                plan="enterprise",
+                max_agents=50,
+                max_chats_per_agent=10,
+                widget_api_key=widget_key,
+            )
+            db.add(default_tenant)
+            await db.flush()
+
+            tenant_id = default_tenant.id
             api_key = f"sk_{secrets.token_hex(32)}"
 
+            # 2. Create admin agent
             admin_agent = Agent(
                 name="Admin",
                 email="admin@example.com",
@@ -49,47 +66,47 @@ async def seed_data():
                 status="offline",
                 max_chats=10,
                 api_key=api_key,
+                tenant_id=tenant_id,
             )
             db.add(admin_agent)
 
-            # Default canned responses
+            # 3. Create superadmin agent
+            sa_key = f"sk_{secrets.token_hex(32)}"
+            superadmin_agent = Agent(
+                name="Super Admin",
+                email="superadmin@example.com",
+                password_hash=hash_password("superadmin123"),
+                role="superadmin",
+                status="offline",
+                max_chats=0,
+                api_key=sa_key,
+                tenant_id=tenant_id,
+            )
+            db.add(superadmin_agent)
+
+            # 4. Default canned responses
             canned = [
-                CannedResponse(
-                    shortcut="/hi",
-                    title="Greeting",
-                    content="Hi there! How can I help you today?",
-                ),
-                CannedResponse(
-                    shortcut="/wait",
-                    title="Please Wait",
-                    content="Please hold on while I look into this for you.",
-                ),
-                CannedResponse(
-                    shortcut="/transfer",
-                    title="Transferring",
-                    content="I'm transferring you to a specialist who can better assist you.",
-                ),
-                CannedResponse(
-                    shortcut="/bye",
-                    title="Goodbye",
-                    content="Thank you for contacting us! Have a great day!",
-                ),
-                CannedResponse(
-                    shortcut="/resolve",
-                    title="Resolving",
-                    content="Is there anything else I can help you with before I close this chat?",
-                ),
+                CannedResponse(shortcut="/hi", title="Greeting",
+                               content="Hi there! How can I help you today?", tenant_id=tenant_id),
+                CannedResponse(shortcut="/wait", title="Please Wait",
+                               content="Please hold on while I look into this for you.", tenant_id=tenant_id),
+                CannedResponse(shortcut="/transfer", title="Transferring",
+                               content="I'm transferring you to a specialist who can better assist you.", tenant_id=tenant_id),
+                CannedResponse(shortcut="/bye", title="Goodbye",
+                               content="Thank you for contacting us! Have a great day!", tenant_id=tenant_id),
+                CannedResponse(shortcut="/resolve", title="Resolving",
+                               content="Is there anything else I can help you with before I close this chat?", tenant_id=tenant_id),
             ]
             for c in canned:
                 db.add(c)
 
-            # Default settings
+            # 5. Default settings
             default_settings = [
-                Setting(key="auto_assign", value="true"),
-                Setting(key="welcome_message", value="Thank you for reaching out! An agent will be with you shortly."),
-                Setting(key="away_message", value="We're currently offline. We'll get back to you as soon as possible."),
-                Setting(key="resolved_message", value="This conversation has been resolved. Feel free to reach out again if you need help!"),
-                Setting(key="business_name", value="Support"),
+                Setting(key="auto_assign", value="true", tenant_id=tenant_id),
+                Setting(key="welcome_message", value="Thank you for reaching out! An agent will be with you shortly.", tenant_id=tenant_id),
+                Setting(key="away_message", value="We're currently offline. We'll get back to you as soon as possible.", tenant_id=tenant_id),
+                Setting(key="resolved_message", value="This conversation has been resolved. Feel free to reach out again if you need help!", tenant_id=tenant_id),
+                Setting(key="business_name", value="Support", tenant_id=tenant_id),
             ]
             for s in default_settings:
                 db.add(s)
@@ -98,8 +115,11 @@ async def seed_data():
 
             logger.info("=" * 60)
             logger.info("  SEED DATA CREATED")
+            logger.info(f"  Tenant: default (id={tenant_id})")
             logger.info(f"  Admin: admin@example.com / admin123")
+            logger.info(f"  Superadmin: superadmin@example.com / superadmin123")
             logger.info(f"  API Key: {api_key}")
+            logger.info(f"  Widget Key: {widget_key}")
             logger.info("=" * 60)
 
         except Exception as e:
@@ -110,19 +130,24 @@ async def seed_data():
 # ── Lifespan ──────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create tables + seed
+    # Safety check: reject default JWT secret in production
+    if settings.ENVIRONMENT == "production" and settings.JWT_SECRET == "change-me-in-production-use-a-long-random-string":
+        raise RuntimeError("CRITICAL: Change JWT_SECRET before running in production!")
+
+    # Database initialization
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database: All tables ensured via create_all")
+
     await seed_data()
     yield
-    # Shutdown
     await engine.dispose()
 
 
 # ── App Factory ───────────────────────────────────────────────
 app = FastAPI(
     title="WhatsApp Multi-Agent Support",
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -145,6 +170,7 @@ app.include_router(conversations.router)
 app.include_router(widget.router)
 app.include_router(webhook.router)
 app.include_router(admin.router)
+app.include_router(superadmin.router)
 
 
 # ── Health Check ──────────────────────────────────────────────
@@ -158,36 +184,39 @@ async def health():
 async def websocket_endpoint(websocket: WebSocket):
     """
     Agent dashboard WebSocket.
-    1. Client connects
-    2. Client sends { type: 'auth', token: '<jwt>' }
-    3. Server validates, registers, responds
+    Supports two auth methods:
+    1. { type: 'auth', token: '<jwt>' }
+    2. { type: 'auth', ticket: '<ws_ticket>' }
     """
-    # Accept first, then wait for auth
     await websocket.accept()
 
     agent_id = None
     try:
-        # Wait for auth frame (10 second timeout)
         auth_data = await websocket.receive_json()
-        if auth_data.get("type") != "auth" or not auth_data.get("token"):
+        if auth_data.get("type") != "auth":
             await websocket.send_json({"type": "auth:error", "detail": "Auth frame required"})
             await websocket.close()
             return
 
-        try:
-            payload = decode_token(auth_data["token"])
-            agent_id = payload.get("sub")
-        except Exception:
-            await websocket.send_json({"type": "auth:error", "detail": "Invalid token"})
-            await websocket.close()
-            return
+        # Try ticket auth first, then JWT
+        ticket = auth_data.get("ticket")
+        token = auth_data.get("token")
+
+        if ticket:
+            agent_id = validate_ws_ticket(ticket)
+        elif token:
+            try:
+                payload = decode_token(token)
+                agent_id = payload.get("sub")
+            except Exception:
+                pass
 
         if not agent_id:
-            await websocket.send_json({"type": "auth:error", "detail": "Invalid token"})
+            await websocket.send_json({"type": "auth:error", "detail": "Invalid credentials"})
             await websocket.close()
             return
 
-        # Register connection (ws already accepted, so we register directly)
+        # Register connection
         if agent_id not in ws_manager._connections:
             ws_manager._connections[agent_id] = []
         ws_manager._connections[agent_id].append(websocket)
@@ -202,10 +231,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 agent.status = "online"
                 await db.commit()
 
-        # Send auth success
         await websocket.send_json({"type": "auth:success", "agent_id": agent_id})
 
-        # Broadcast agent status
         await ws_manager.broadcast_except(agent_id, {
             "type": "agent:status",
             "agent_id": agent_id,
@@ -215,11 +242,6 @@ async def websocket_endpoint(websocket: WebSocket):
         # Send queue count
         async with async_session() as db:
             from sqlalchemy import func
-            result = await db.execute(
-                select(func.count()).select_from(
-                    select(Agent.id).where(Agent.status == "pending").subquery()
-                )
-            )
             from models.conversation import Conversation
             pending_result = await db.execute(
                 select(func.count(Conversation.id)).where(Conversation.status == "pending")
@@ -228,13 +250,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
         await websocket.send_json({"type": "queue:update", "count": pending_count})
 
-        # Listen for messages from the agent
+        # Listen for messages
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
 
             if msg_type == "typing":
-                # Optional: broadcast typing indicator
                 conv_id = data.get("conversation_id")
                 if conv_id:
                     await ws_manager.broadcast_except(agent_id, {
@@ -251,7 +272,6 @@ async def websocket_endpoint(websocket: WebSocket):
         if agent_id:
             fully_disconnected = ws_manager.disconnect(agent_id, websocket)
             if fully_disconnected:
-                # Set agent offline
                 async with async_session() as db:
                     result = await db.execute(select(Agent).where(Agent.id == agent_id))
                     agent = result.scalar_one_or_none()

@@ -1,0 +1,33 @@
+# Production override — adds Nginx reverse proxy, removes exposed ports from backend/frontend
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+
+version: '3.8'
+
+services:
+  backend:
+    ports: []
+    environment:
+      ENVIRONMENT: production
+
+  frontend:
+    ports: []
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - app-net
+
+volumes:
+  certbot_certs:
+  certbot_www:

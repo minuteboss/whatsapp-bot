@@ -16,6 +16,16 @@ async def seed():
             print("Already seeded")
             return
 
+        from models.tenant import Tenant
+        default_tenant = Tenant(
+            name="Default Company",
+            slug="default",
+            is_active=True,
+            plan="free"
+        )
+        db.add(default_tenant)
+        await db.flush()
+
         api_key = f"sk_{secrets.token_hex(32)}"
         admin_agent = Agent(
             name="Admin",
@@ -25,6 +35,7 @@ async def seed():
             status="offline",
             max_chats=10,
             api_key=api_key,
+            tenant_id=default_tenant.id,
         )
         db.add(admin_agent)
         await db.commit()

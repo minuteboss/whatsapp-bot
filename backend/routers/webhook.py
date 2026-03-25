@@ -1,20 +1,26 @@
 """
 Webhook router — /webhook
 Handles Meta WhatsApp webhook verification and inbound events.
+Tenant resolution: phone_number_id → Tenant (via whatsapp_company_phone_number_id)
 """
 
 import logging
+import os
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from database import async_session
 from models.agent import Agent
 from models.conversation import Conversation
 from models.message import Message
 from models.setting import Setting
+from models.tenant import Tenant
 from services.whatsapp_service import wa_service
 from services.conversation_service import ConversationService
 from services.websocket_manager import ws_manager
@@ -22,6 +28,9 @@ from services.websocket_manager import ws_manager
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["webhook"])
+
+MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "media")
+os.makedirs(MEDIA_DIR, exist_ok=True)
 
 
 @router.get("/webhook")
@@ -32,7 +41,7 @@ async def verify_webhook(request: Request):
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
 
-    if mode == "subscribe" and token == wa_service.verify_token:
+    if mode == "subscribe" and token == settings.WHATSAPP_VERIFY_TOKEN:
         logger.info("Webhook verified")
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(content=challenge)
@@ -42,21 +51,52 @@ async def verify_webhook(request: Request):
 
 @router.post("/webhook")
 async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
-    """
-    Receive Meta webhook events.
-    Return 200 immediately — process in background.
-    """
+    """Receive Meta webhook events. Return 200 immediately — process in background."""
     raw_body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
 
-    # Verify signature
     if not wa_service.verify_webhook_signature(signature, raw_body):
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     body = await request.json()
     background_tasks.add_task(_process_webhook, body)
-
     return {"status": "ok"}
+
+
+@router.get("/api/v1/media/{filename}")
+async def serve_media(filename: str):
+    """Serve downloaded media files."""
+    filepath = os.path.join(MEDIA_DIR, filename)
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(filepath)
+
+
+async def _resolve_tenant_from_phone_id(phone_number_id: str, db: AsyncSession) -> Tenant | None:
+    """Resolve tenant by matching the phone_number_id to tenant WA config or env vars."""
+    # Check per-tenant configs
+    result = await db.execute(
+        select(Tenant).where(
+            Tenant.whatsapp_company_phone_number_id == phone_number_id,
+            Tenant.is_active == True,
+        )
+    )
+    tenant = result.scalar_one_or_none()
+    if tenant:
+        return tenant
+
+    # Fallback: if the phone_number_id matches env var, use default tenant
+    if phone_number_id == settings.WHATSAPP_COMPANY_PHONE_NUMBER_ID:
+        result = await db.execute(
+            select(Tenant).where(Tenant.slug == "default", Tenant.is_active == True)
+        )
+        return result.scalar_one_or_none()
+
+    # Last resort: return default tenant
+    result = await db.execute(
+        select(Tenant).where(Tenant.slug == "default", Tenant.is_active == True)
+    )
+    return result.scalar_one_or_none()
 
 
 async def _process_webhook(body: dict):
@@ -77,7 +117,7 @@ async def _process_webhook(body: dict):
 
 
 async def _handle_status_update(event: dict, db: AsyncSession):
-    """Handle delivery status updates (sent, delivered, read, failed)."""
+    """Handle delivery status updates."""
     wa_message_id = event.get("wa_message_id")
     status = event.get("status")
     if not wa_message_id or not status:
@@ -90,7 +130,6 @@ async def _handle_status_update(event: dict, db: AsyncSession):
     if msg:
         msg.delivery_status = status
         await db.flush()
-
         await ws_manager.broadcast_all({
             "type": "message:status",
             "wa_message_id": wa_message_id,
@@ -99,35 +138,61 @@ async def _handle_status_update(event: dict, db: AsyncSession):
 
 
 async def _handle_incoming_message(event: dict, db: AsyncSession):
-    """Handle an incoming message — either from a customer or an agent's personal WA."""
+    """Handle an incoming message — either from a customer or agent's personal WA."""
     phone_number_id = event.get("phone_number_id", "")
     wa_message_id = event.get("wa_message_id", "")
     sender_phone = event.get("from", "")
     content = event.get("content", "")
     contact_name = event.get("contact_name", "")
+    media_id = event.get("media_id")
 
-    # ── Deduplication ─────────────────────────────────────────
+    # Deduplication
     if wa_message_id:
         existing = await db.execute(
             select(Message).where(Message.wa_message_id == wa_message_id)
         )
         if existing.scalar_one_or_none():
-            logger.info(f"Duplicate message skipped: {wa_message_id}")
             return
 
-    # ── Check if sender is an agent ───────────────────────────
-    agent = await wa_service.identify_sender(phone_number_id, db)
-    if agent:
-        # Agent is replying from their personal WhatsApp
-        await _handle_agent_wa_reply(agent, sender_phone, content, wa_message_id, db)
+    # Resolve tenant
+    tenant = await _resolve_tenant_from_phone_id(phone_number_id, db)
+    if not tenant:
+        logger.warning(f"No tenant found for phone_number_id={phone_number_id}")
         return
 
-    # ── Customer message ──────────────────────────────────────
-    # Find existing open conversation for this customer phone
+    # Download media if applicable
+    media_url = None
+    if media_id:
+        try:
+            file_bytes, mime_type = await wa_service.download_media(media_id, tenant=tenant)
+            if file_bytes:
+                ext = mime_type.split("/")[-1].split(";")[0] if mime_type else "bin"
+                filename = f"{uuid.uuid4().hex}.{ext}"
+                filepath = os.path.join(MEDIA_DIR, filename)
+                with open(filepath, "wb") as f:
+                    f.write(file_bytes)
+                media_url = f"/api/v1/media/{filename}"
+        except Exception as e:
+            logger.error(f"Media download failed: {e}")
+
+    # Check if sender is an agent's personal WA.
+    # Only applies when the receiving phone_number_id is DIFFERENT from the company phone
+    # (i.e. an agent has their own separate registered number).
+    # If the company phone and agent personal WA are the same number, all inbound
+    # messages at that number are customer messages — skip the agent check.
+    company_phone_id = wa_service._get_company_phone_id(tenant)
+    if phone_number_id != company_phone_id:
+        agent = await wa_service.identify_sender(phone_number_id, db)
+        if agent:
+            await _handle_agent_wa_reply(agent, sender_phone, content, wa_message_id, media_url, tenant, db)
+            return
+
+    # Customer message — find existing conversation
     result = await db.execute(
         select(Conversation).where(
             and_(
                 Conversation.customer_phone == sender_phone,
+                Conversation.tenant_id == tenant.id,
                 Conversation.status.in_(["pending", "active"]),
             )
         ).order_by(Conversation.created_at.desc()).limit(1)
@@ -135,78 +200,80 @@ async def _handle_incoming_message(event: dict, db: AsyncSession):
     conv = result.scalar_one_or_none()
 
     if not conv:
-        # Create new conversation
         conv = Conversation(
             channel="whatsapp",
             status="pending",
             customer_name=contact_name or sender_phone,
             customer_phone=sender_phone,
+            tenant_id=tenant.id,
         )
         db.add(conv)
         await db.flush()
 
-        # Try auto-assign
-        assigned_agent = await ConversationService.auto_assign(conv.id, db)
+        assigned_agent = await ConversationService.auto_assign(conv, db, tenant_id=tenant.id)
 
-        # Send welcome or away message
         if not assigned_agent:
-            # Check if any agents online
             from sqlalchemy import func
             online_count = await db.execute(
-                select(func.count(Agent.id)).where(Agent.status.in_(["online", "away"]))
+                select(func.count(Agent.id)).where(
+                    Agent.status.in_(["online", "away"]),
+                    Agent.tenant_id == tenant.id,
+                )
             )
+            company_phone_id = wa_service._get_company_phone_id(tenant)
+
             if (online_count.scalar() or 0) == 0:
-                # Send away message
-                away = await db.execute(select(Setting).where(Setting.key == "away_message"))
+                away = await db.execute(
+                    select(Setting).where(Setting.key == "away_message", Setting.tenant_id == tenant.id)
+                )
                 away_setting = away.scalar_one_or_none()
-                if away_setting and wa_service.company_phone_id:
+                if away_setting and company_phone_id:
                     await wa_service.send_text_message(
-                        wa_service.company_phone_id, sender_phone, away_setting.value
+                        company_phone_id, sender_phone, away_setting.value, tenant=tenant
                     )
             else:
-                # Send welcome message
-                welcome = await db.execute(select(Setting).where(Setting.key == "welcome_message"))
+                welcome = await db.execute(
+                    select(Setting).where(Setting.key == "welcome_message", Setting.tenant_id == tenant.id)
+                )
                 welcome_setting = welcome.scalar_one_or_none()
-                if welcome_setting and wa_service.company_phone_id:
+                if welcome_setting and company_phone_id:
                     await wa_service.send_text_message(
-                        wa_service.company_phone_id, sender_phone, welcome_setting.value
+                        company_phone_id, sender_phone, welcome_setting.value, tenant=tenant
                     )
 
-        # Broadcast new conversation
         await ws_manager.broadcast_all({
             "type": "conversation:new",
             "conversation": ConversationService._conv_dict(conv),
         })
 
-        from sqlalchemy import func as sqlfunc
-        pending = await db.execute(
-            select(sqlfunc.count(Conversation.id)).where(Conversation.status == "pending")
-        )
-        await ws_manager.broadcast_all({"type": "queue:update", "count": pending.scalar() or 0})
+        pending_count = await ConversationService._pending_count(db, tenant.id)
+        await ws_manager.broadcast_all({"type": "queue:update", "count": pending_count})
 
     # Save message
     msg = Message(
         conversation_id=conv.id,
+        tenant_id=tenant.id,
         sender_type="customer",
         sender_name=contact_name or sender_phone,
         content=content,
         wa_message_id=wa_message_id,
+        media_url=media_url,
     )
     db.add(msg)
 
-    conv.last_message_at = datetime.now(timezone.utc)
-    conv.updated_at = datetime.now(timezone.utc)
+    conv.last_message_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    conv.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.flush()
 
-    # Mark as read on WA
-    if wa_service.company_phone_id:
-        await wa_service.mark_as_read(wa_service.company_phone_id, wa_message_id)
+    # Mark as read
+    company_phone_id = wa_service._get_company_phone_id(tenant)
+    if company_phone_id:
+        await wa_service.mark_as_read(company_phone_id, wa_message_id, tenant=tenant)
 
-    # Broadcast to dashboards
     await ws_manager.broadcast_all({
         "type": "message:new",
         "message": ConversationService._msg_dict(msg),
-        "conversation": ConversationService._conv_dict(conv),
+        "conversation": ConversationService._conv_dict(conv, last_message=content),
     })
 
 
@@ -215,17 +282,16 @@ async def _handle_agent_wa_reply(
     recipient_phone: str,
     content: str,
     wa_message_id: str,
+    media_url: str | None,
+    tenant: Tenant,
     db: AsyncSession,
 ):
-    """
-    Handle a message from an agent's personal WhatsApp.
-    Find the matching conversation and record it as an agent reply.
-    """
-    # Find conversation with the customer phone that this agent is assigned to
+    """Handle a message from an agent's personal WhatsApp."""
     result = await db.execute(
         select(Conversation).where(
             and_(
                 Conversation.customer_phone == recipient_phone,
+                Conversation.tenant_id == tenant.id,
                 Conversation.status.in_(["pending", "active"]),
             )
         ).order_by(Conversation.created_at.desc()).limit(1)
@@ -236,25 +302,25 @@ async def _handle_agent_wa_reply(
         logger.warning(f"Agent {agent.id} replied to {recipient_phone} but no conversation found")
         return
 
-    # Save message as agent reply
     msg = Message(
         conversation_id=conv.id,
+        tenant_id=tenant.id,
         sender_type="agent",
         sender_agent_id=agent.id,
         sender_name=agent.name,
         content=content,
         wa_message_id=wa_message_id,
         wa_sent_from="agent_personal",
+        media_url=media_url,
     )
     db.add(msg)
 
-    conv.last_message_at = datetime.now(timezone.utc)
-    conv.updated_at = datetime.now(timezone.utc)
+    conv.last_message_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    conv.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.flush()
 
-    # Broadcast to dashboards
     await ws_manager.broadcast_all({
         "type": "wa:reply_received",
         "message": ConversationService._msg_dict(msg),
-        "conversation": ConversationService._conv_dict(conv),
+        "conversation": ConversationService._conv_dict(conv, last_message=content),
     })

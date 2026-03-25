@@ -1,0 +1,460 @@
+﻿docker : INFO:     
+Started server 
+process [1]
+At line:1 char:1
++ docker logs 
+whatsapp-backend-1 
+2>&1 | Out-File 
+-FilePath 
+C:\Users\HP\ ...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (INFO:        
+ Started server pr    
+ocess [1]:String)     
+[], RemoteExcept    
+ion
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback
+INFO:     Started 
+server process [1]
+INFO:     Waiting for 
+application startup.
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.sch
+emas
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.tab
+les
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.typ
+es
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.con
+straints
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.def
+aults
+INFO:alembic.runtime.p
+lugins:setup plugin al
+embic.autogenerate.com
+ments
+/usr/local/lib/python3
+.11/site-packages/uvic
+orn/lifespan/on.py:91:
+ RuntimeWarning: 
+coroutine 'run_async_m
+igrations' was never 
+awaited
+  return
+RuntimeWarning: 
+Enable tracemalloc to 
+get the object 
+allocation traceback

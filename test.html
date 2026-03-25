@@ -1,0 +1,257 @@
+<!-- AAK Professional Pillars Section: Standalone Single Row -->
+<section class="aak-pillars-wrapper">
+    <style>
+        .aak-pillars-wrapper {
+            font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 40px 20px;
+            background-color: #ffffff;
+            color: #333333;
+        }
+
+        .aak-pillars-container {
+            max-width: 100%;
+            margin: 0 auto;
+            padding: 0 10px;
+        }
+
+        .aak-pillars-header {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .aak-pillars-title {
+            font-size: 28px;
+            font-weight: 800;
+            text-transform: uppercase;
+            margin-bottom: 15px;
+            letter-spacing: 1px;
+            color: #1a1a1a;
+        }
+
+        .aak-pillars-divider {
+            width: 50px;
+            height: 4px;
+            background-color: #d11218;
+            margin: 0 auto 20px;
+        }
+
+        .aak-pillars-subtitle {
+            color: #666666;
+            max-width: 800px;
+            margin: 0 auto;
+            font-size: 14px;
+            line-height: 1.6;
+            font-weight: 500;
+        }
+
+        /* Enforced Single Row Grid Layout for Desktop */
+        .aak-pillars-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 4px;
+        }
+
+        .aak-pillar-card {
+            position: relative;
+            height: 170px;
+            overflow: hidden;
+            background-color: #000000;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            transition: transform 0.3s ease;
+            text-decoration: none;
+            border-radius: 2px;
+        }
+
+        .aak-pillar-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .aak-pillar-img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.8;
+            transition: opacity 0.3s ease, transform 0.5s ease;
+        }
+
+        .aak-pillar-card:hover .aak-pillar-img {
+            opacity: 0.6;
+            transform: scale(1.05);
+        }
+
+        /* Full-overlay content area */
+        .aak-pillar-content {
+            position: relative;
+            z-index: 5;
+            padding: 8px 4px 0;
+            text-align: center;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 60%, transparent 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+        }
+
+        .aak-pillar-name {
+            color: #ffffff;
+            font-size: 9px;
+            font-weight: 800;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+            line-height: 1.2;
+            padding: 0 3px;
+        }
+
+        .aak-pillar-btn {
+            display: inline-block;
+            background-color: #d11218;
+            color: #ffffff;
+            font-size: 7px;
+            font-weight: 800;
+            text-transform: uppercase;
+            padding: 6px 0;
+            transition: all 0.3s ease;
+            letter-spacing: 1px;
+            border: none;
+            width: 100%;
+            white-space: nowrap;
+        }
+
+        .aak-pillar-card:hover .aak-pillar-btn {
+            background-color: #ffffff;
+            color: #d11218;
+        }
+
+        /* Responsive Breakpoints */
+        @media (max-width: 1200px) {
+            .aak-pillars-grid {
+                grid-template-columns: repeat(4, 1fr);
+                gap: 12px;
+            }
+
+            .aak-pillar-name {
+                font-size: 11px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .aak-pillars-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .aak-pillar-card {
+                height: 160px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .aak-pillars-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .aak-pillars-title {
+                font-size: 22px;
+            }
+        }
+    </style>
+
+    <div class="aak-pillars-container">
+        <div class="aak-pillars-header">
+            <h2 class="aak-pillars-title">The Eight Professional Chapters</h2>
+            <div class="aak-pillars-divider"></div>
+            <p class="aak-pillars-subtitle">
+                Uniting experts across the built and natural environment disciplines to foster professional integrity |
+                technical excellence and sustainable development in Kenya.
+            </p>
+        </div>
+
+        <div class="aak-pillars-grid">
+            <!-- Architects -->
+            <a href="/architects-chapter/" class="aak-pillar-card">
+                <img src="https://aak.or.ke/wp-content/uploads/2026/03/arch-scaled.webp?q=80&w=800"
+                    class="aak-pillar-img" alt="Architects Chapter">
+                <div class="aak-pillar-content">
+                    <h3 class="aak-pillar-name">Architects</h3>
+                    <span class="aak-pillar-btn">Explore Chapter</span>
+                </div>
+            </a>
+
+            <!-- Quantity Surveyors -->
+            <a href="/quantity-surveyors-chapter/" class="aak-pillar-card">
+                <img src="https://aak.or.ke/wp-content/uploads/2026/03/QS.png?q=80&w=800"
+                    class="aak-pillar-img" alt="Quantity Surveyors Chapter">
+                <div class="aak-pillar-content">
+                    <h3 class="aak-pillar-name">Quantity Surveyors</h3>
+                    <span class="aak-pillar-btn">Explore Chapter</span>
+                </div>
+            </a>
+
+            <!-- Town Planners -->
+            <a href="/town-planners-chapter/" class="aak-pillar-card">
+                <img src="https://aak.or.ke/wp-content/uploads/2026/03/TPC.jpg-scaled.jpeg?q=80&w=800"
+                    class="aak-pillar-img" alt="Town Planners Chapter">
+                <div class="aak-pillar-content">
+                    <h3 class="aak-pillar-name">Town Planners</h3>
+                    <span class="aak-pillar-btn">Explore Chapter</span>
+                </div>
+            </a>
+
+            <!-- Engineers -->
+            <a href="/engineers-chapter/" class="aak-pillar-card">
+                <img src="https://aak.or.ke/wp-content/uploads/2026/03/Eng.png?q=80&w=800"
+                    class="aak-pillar-img" alt="Engineers Chapter">
+                <div class="aak-pillar-content">
+                    <h3 class="aak-pillar-name">Engineers</h3>
+                    <span class="aak-pillar-btn">Explore Chapter</span>
+                </div>
+            </a>
+
+            <!-- Landscape Architects -->
+            <a href="/landscape-architects-chapter/" class="aak-pillar-card">
+                <img src="https://aak.or.ke/wp-content/uploads/2026/03/Landscape.jpeg?q=80&w=800" class="aak-pillar-img"
+                    alt="Landscape Architects Chapter">
+                <div class="aak-pillar-content">
+                    <div class="aak-pillar-name">Landscape Architects</div>
+                    <span class="aak-pillar-btn">Explore Chapter</span>
+                </div>
+            </a>
+
+            <!-- Environmental Design -->
+            <a href="/environmental-design-consultants-chapter/" class="aak-pillar-card">
+                <img src="https://aak.or.ke/wp-content/uploads/2026/03/EDC.JPG-scaled.jpeg?q=80&w=800"
+                    class="aak-pillar-img" alt="Environmental Design Chapter">
+                <div class="aak-pillar-content">
+                    <div class="aak-pillar-name">Environmental Design</div>
+                    <span class="aak-pillar-btn">Explore Chapter</span>
+                </div>
+            </a>
+
+            <!-- Project Managers -->
+            <a href="construction-project-management-chapter" class="aak-pillar-card">
+                <img src="https://aak.or.ke/wp-content/uploads/2026/03/CPM.jpeg?q=80&w=800"
+                    class="aak-pillar-img" alt="Project Managers Chapter">
+                <div class="aak-pillar-content">
+                    <h3 class="aak-pillar-name">Construction Project Managers</h3>
+                    <span class="aak-pillar-btn">Explore Chapter</span>
+                </div>
+            </a>
+
+            <!-- Interior Designers -->
+            <a href="/interior-designers-chapter/" class="aak-pillar-card">
+                <img src="https://aak.or.ke/wp-content/uploads/2026/03/Interior-design-scaled.webp?q=80&w=800"
+                    class="aak-pillar-img" alt="Interior Designers Chapter">
+                <div class="aak-pillar-content">
+                    <h3 class="aak-pillar-name">Interior Designers</h3>
+                    <span class="aak-pillar-btn">Explore Chapter</span>
+                </div>
+            </a>
+        </div>
+    </div>
+</section>

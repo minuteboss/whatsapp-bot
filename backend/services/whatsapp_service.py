@@ -1,12 +1,12 @@
 """
 WhatsApp Service — Meta Cloud API wrapper.
-All calls via httpx AsyncClient.
+Supports per-tenant credentials with env var fallback.
 """
 
 import hmac
 import hashlib
 import logging
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 from sqlalchemy import select
@@ -23,34 +23,50 @@ class WhatsAppService:
 
     def __init__(self):
         self.base_url = settings.whatsapp_base_url
-        self.token = settings.WHATSAPP_TOKEN
-        self.company_phone_id = settings.WHATSAPP_COMPANY_PHONE_NUMBER_ID
-        self.waba_id = settings.WHATSAPP_BUSINESS_ACCOUNT_ID
-        self.app_secret = settings.WHATSAPP_APP_SECRET
-        self.verify_token = settings.WHATSAPP_VERIFY_TOKEN
 
-    @property
-    def _headers(self) -> dict:
+    def _get_token(self, tenant=None) -> str | None:
+        """Get WhatsApp token: tenant first, then env var."""
+        if tenant and tenant.whatsapp_token:
+            return tenant.whatsapp_token
+        return settings.WHATSAPP_TOKEN
+
+    def _get_company_phone_id(self, tenant=None) -> str | None:
+        if tenant and tenant.whatsapp_company_phone_number_id:
+            return tenant.whatsapp_company_phone_number_id
+        return settings.WHATSAPP_COMPANY_PHONE_NUMBER_ID
+
+    def _get_waba_id(self, tenant=None) -> str | None:
+        if tenant and tenant.whatsapp_business_account_id:
+            return tenant.whatsapp_business_account_id
+        return settings.WHATSAPP_BUSINESS_ACCOUNT_ID
+
+    def _get_app_secret(self, tenant=None) -> str | None:
+        if tenant and tenant.whatsapp_app_secret:
+            return tenant.whatsapp_app_secret
+        return settings.WHATSAPP_APP_SECRET
+
+    def _get_verify_token(self, tenant=None) -> str:
+        if tenant and tenant.whatsapp_verify_token:
+            return tenant.whatsapp_verify_token
+        return settings.WHATSAPP_VERIFY_TOKEN
+
+    def _headers(self, tenant=None) -> dict:
+        token = self._get_token(tenant)
         return {
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
 
-    @property
-    def is_configured(self) -> bool:
-        return bool(self.token and self.company_phone_id)
+    def is_configured(self, tenant=None) -> bool:
+        return bool(self._get_token(tenant) and self._get_company_phone_id(tenant))
 
     # ── Sending ───────────────────────────────────────────────
 
     async def send_text_message(
-        self, phone_number_id: str, to: str, text: str
+        self, phone_number_id: str, to: str, text: str, tenant=None
     ) -> dict | None:
-        """
-        Send a text message via the WhatsApp API.
-        phone_number_id: the sender's Phone Number ID (company or agent personal).
-        to: recipient phone number in e164 format (no +).
-        """
-        if not self.is_configured:
+        token = self._get_token(tenant)
+        if not token:
             logger.warning("WhatsApp not configured — skipping send")
             return None
 
@@ -63,7 +79,7 @@ class WhatsAppService:
         }
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json=payload, headers=self._headers, timeout=15)
+                resp = await client.post(url, json=payload, headers=self._headers(tenant), timeout=15)
                 resp.raise_for_status()
                 data = resp.json()
                 logger.info(f"Message sent to {to} via {phone_number_id}")
@@ -72,9 +88,8 @@ class WhatsAppService:
             logger.error(f"Failed to send WA message: {e}")
             return None
 
-    async def mark_as_read(self, phone_number_id: str, wa_message_id: str):
-        """Mark a message as read. Non-critical — catch all exceptions."""
-        if not self.is_configured:
+    async def mark_as_read(self, phone_number_id: str, wa_message_id: str, tenant=None):
+        if not self._get_token(tenant):
             return
         url = f"{self.base_url}/{phone_number_id}/messages"
         payload = {
@@ -84,21 +99,53 @@ class WhatsAppService:
         }
         try:
             async with httpx.AsyncClient() as client:
-                await client.post(url, json=payload, headers=self._headers, timeout=10)
+                await client.post(url, json=payload, headers=self._headers(tenant), timeout=10)
         except Exception as e:
             logger.warning(f"Failed to mark as read: {e}")
 
+    # ── Media Download ────────────────────────────────────────
+
+    async def download_media(self, media_id: str, tenant=None) -> tuple[bytes | None, str]:
+        """Download media from Meta Graph API. Returns (bytes, mime_type)."""
+        token = self._get_token(tenant)
+        if not token:
+            return None, ""
+        try:
+            async with httpx.AsyncClient() as client:
+                # First, get the media URL
+                resp = await client.get(
+                    f"{self.base_url}/{media_id}",
+                    headers=self._headers(tenant),
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                media_info = resp.json()
+                media_url = media_info.get("url")
+                mime_type = media_info.get("mime_type", "application/octet-stream")
+
+                if not media_url:
+                    return None, ""
+
+                # Download the actual file
+                file_resp = await client.get(
+                    media_url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=30,
+                )
+                file_resp.raise_for_status()
+                return file_resp.content, mime_type
+        except Exception as e:
+            logger.error(f"Failed to download media {media_id}: {e}")
+            return None, ""
+
     # ── Webhook Verification ──────────────────────────────────
 
-    def verify_webhook_signature(self, signature: str, raw_body: bytes) -> bool:
-        """
-        Verify HMAC-SHA256 signature from Meta.
-        Returns True if no secret is configured (dev mode).
-        """
-        if not self.app_secret:
+    def verify_webhook_signature(self, signature: str, raw_body: bytes, tenant=None) -> bool:
+        app_secret = self._get_app_secret(tenant)
+        if not app_secret:
             return True
         expected = hmac.new(
-            self.app_secret.encode(), raw_body, hashlib.sha256
+            app_secret.encode(), raw_body, hashlib.sha256
         ).hexdigest()
         sig_hash = signature.replace("sha256=", "") if signature else ""
         return hmac.compare_digest(expected, sig_hash)
@@ -106,10 +153,6 @@ class WhatsAppService:
     # ── Webhook Parsing ───────────────────────────────────────
 
     def parse_incoming_webhook(self, body: dict) -> list[dict]:
-        """
-        Parse inbound webhook payload from Meta.
-        Returns list of parsed events (messages or statuses).
-        """
         events = []
         try:
             for entry in body.get("entry", []):
@@ -118,7 +161,6 @@ class WhatsAppService:
                     metadata = value.get("metadata", {})
                     phone_number_id = metadata.get("phone_number_id", "")
 
-                    # Status updates
                     for status in value.get("statuses", []):
                         events.append({
                             "type": "status",
@@ -129,7 +171,6 @@ class WhatsAppService:
                             "timestamp": status.get("timestamp"),
                         })
 
-                    # Incoming messages
                     for msg in value.get("messages", []):
                         contact = {}
                         contacts = value.get("contacts", [])
@@ -138,19 +179,18 @@ class WhatsAppService:
 
                         msg_type = msg.get("type", "text")
                         content = ""
+                        media_id = None
                         if msg_type == "text":
                             content = msg.get("text", {}).get("body", "")
-                        elif msg_type == "image":
-                            content = "[Image]"
-                        elif msg_type == "audio":
-                            content = "[Audio]"
-                        elif msg_type == "document":
-                            content = "[Document]"
+                        elif msg_type in ("image", "audio", "document", "video", "sticker"):
+                            media_data = msg.get(msg_type, {})
+                            media_id = media_data.get("id")
+                            content = f"[{msg_type.capitalize()}]"
+                            if media_data.get("caption"):
+                                content = media_data["caption"]
                         elif msg_type == "location":
                             loc = msg.get("location", {})
                             content = f"[Location: {loc.get('latitude')}, {loc.get('longitude')}]"
-                        elif msg_type == "sticker":
-                            content = "[Sticker]"
                         elif msg_type == "interactive":
                             interactive = msg.get("interactive", {})
                             content = interactive.get("button_reply", {}).get("title", "[Interactive]")
@@ -166,6 +206,7 @@ class WhatsAppService:
                             "msg_type": msg_type,
                             "content": content,
                             "contact_name": contact.get("profile", {}).get("name", ""),
+                            "media_id": media_id,
                         })
         except Exception as e:
             logger.error(f"Failed to parse webhook: {e}")
@@ -177,10 +218,6 @@ class WhatsAppService:
     async def identify_sender(
         self, phone_number_id: str, db: AsyncSession
     ) -> Agent | None:
-        """
-        Check if phone_number_id belongs to an agent.
-        Returns the Agent if found, None if it's a customer.
-        """
         result = await db.execute(
             select(Agent).where(Agent.wa_phone_number_id == phone_number_id)
         )
@@ -188,77 +225,47 @@ class WhatsAppService:
 
     # ── Phone Registration (Agent Connect) ────────────────────
 
-    async def register_phone_number(self, phone_number: str, pin: str = "000000") -> dict | None:
-        """
-        Add a new phone number to the WABA.
-        Initiates the OTP verification flow.
-        """
-        if not self.token or not self.waba_id:
-            logger.error("WhatsApp not configured for phone registration")
-            return None
-
-        url = f"{self.base_url}/{self.waba_id}/phone_numbers"
-        payload = {
-            "cc": phone_number[:3],  # Country code (approx)
-            "phone_number": phone_number,
-            "migrate_phone_number": False,
-            "pin": pin,
-        }
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json=payload, headers=self._headers, timeout=30)
-                resp.raise_for_status()
-                return resp.json()
-        except Exception as e:
-            logger.error(f"Failed to register phone number: {e}")
-            return None
-
-    async def request_verification_code(self, phone_number_id: str, code_method: str = "SMS") -> bool:
-        """Request an OTP code for phone verification."""
-        if not self.token:
-            return False
-
+    async def request_verification_code(self, phone_number_id: str, code_method: str = "SMS", tenant=None) -> tuple[bool, str]:
+        """Returns (success, error_message). On success error_message is empty."""
+        token = self._get_token(tenant)
+        if not token:
+            return False, "WHATSAPP_TOKEN not configured"
         url = f"{self.base_url}/{phone_number_id}/request_code"
         payload = {"code_method": code_method, "language": "en_US"}
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json=payload, headers=self._headers, timeout=15)
-                resp.raise_for_status()
-                return True
+                resp = await client.post(url, json=payload, headers=self._headers(tenant), timeout=15)
+                body = resp.json() if resp.content else {}
+                logger.info(f"request_code response {resp.status_code}: {body}")
+                if not resp.is_success:
+                    error_msg = body.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                    logger.error(f"request_code failed: {error_msg}")
+                    return False, error_msg
+                return True, ""
         except Exception as e:
             logger.error(f"Failed to request verification code: {e}")
-            return False
+            return False, str(e)
 
-    async def verify_phone_otp(self, phone_number_id: str, code: str) -> bool:
-        """Submit OTP to complete phone registration."""
-        if not self.token:
-            return False
-
+    async def verify_code(self, phone_number_id: str, code: str, tenant=None) -> tuple[dict, str]:
+        """Returns (result_dict, error_message). On failure result is empty."""
+        token = self._get_token(tenant)
+        if not token:
+            return {}, "WHATSAPP_TOKEN not configured"
         url = f"{self.base_url}/{phone_number_id}/verify_code"
         payload = {"code": code}
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json=payload, headers=self._headers, timeout=15)
-                resp.raise_for_status()
-                return True
+                resp = await client.post(url, json=payload, headers=self._headers(tenant), timeout=15)
+                body = resp.json() if resp.content else {}
+                logger.info(f"verify_code response {resp.status_code}: {body}")
+                if not resp.is_success:
+                    error_msg = body.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                    logger.error(f"verify_code failed: {error_msg}")
+                    return {}, error_msg
+                return body, ""
         except Exception as e:
             logger.error(f"Failed to verify OTP: {e}")
-            return False
-
-    async def deregister_phone_number(self, phone_number_id: str) -> bool:
-        """Remove a phone number from WABA."""
-        if not self.token:
-            return False
-
-        url = f"{self.base_url}/{phone_number_id}"
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.delete(url, headers=self._headers, timeout=15)
-                resp.raise_for_status()
-                return True
-        except Exception as e:
-            logger.error(f"Failed to deregister phone number: {e}")
-            return False
+            return {}, str(e)
 
 
 # ── Singleton ─────────────────────────────────────────────────

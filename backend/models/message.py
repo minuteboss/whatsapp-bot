@@ -15,6 +15,9 @@ class Message(Base):
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tenants.id"), nullable=True, index=True
+    )
     conversation_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("conversations.id"), nullable=False
     )
@@ -26,11 +29,14 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")
 
+    # Media
+    media_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # WhatsApp tracking
     wa_message_id: Mapped[str | None] = mapped_column(String(200), unique=True, nullable=True)
     wa_sent_from: Mapped[str | None] = mapped_column(String(20), nullable=True)
     delivery_status: Mapped[str] = mapped_column(String(20), nullable=False, default="sent")
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
