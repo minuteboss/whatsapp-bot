@@ -5,7 +5,14 @@ import { useParams, useSearchParams } from 'next/navigation';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-interface StarterField { label: string; key: string; required: boolean }
+interface StarterField {
+  label: string;
+  key: string;
+  required: boolean;
+  type: 'text' | 'email' | 'phone' | 'select' | 'checkbox' | 'textarea' | 'radio';
+  options?: string[];
+  conditional?: Array<{ trigger_value: string; follow_up: StarterField }>;
+}
 
 interface TenantConfig {
   name: string;
@@ -69,11 +76,20 @@ export default function EmbedPage() {
     ws.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data);
-        if (event.type === 'new_message' && event.message) {
+        if (event.type === 'message:new' && event.message) {
           setMessages(prev => {
             if (prev.find(m => m.id === event.message.id)) return prev;
             return [...prev, event.message];
           });
+        }
+        if (event.type === 'conversation:resolved') {
+          setMessages(prev => [...prev, {
+            id: `sys_${Date.now()}`,
+            sender_type: 'system',
+            sender_name: null,
+            content: 'This conversation has been resolved. Thank you!',
+            created_at: new Date().toISOString(),
+          }]);
         }
       } catch { /* ignore */ }
     };
@@ -165,19 +181,15 @@ export default function EmbedPage() {
           </p>
           <form onSubmit={handleStartChat} className="space-y-3">
             {config.starter_fields.map(field => (
-              <div key={field.key}>
-                <label className="block text-xs font-medium text-gray-500 mb-1">
-                  {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
-                </label>
-                <input
-                  type={field.key === 'email' ? 'email' : 'text'}
-                  required={field.required}
-                  value={starterData[field.key] || ''}
-                  onChange={e => setStarterData(p => ({ ...p, [field.key]: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
-                  placeholder={field.label}
-                />
-              </div>
+              <FieldRenderer
+                key={field.key}
+                field={field}
+                value={starterData[field.key] || ''}
+                onChange={(v) => setStarterData(p => ({ ...p, [field.key]: v }))}
+                allData={starterData}
+                onChangeAll={setStarterData}
+                accentColor={accentColor}
+              />
             ))}
             <button type="submit" disabled={isStarting}
               className="w-full py-2.5 text-white text-sm font-semibold rounded-lg"
@@ -198,22 +210,28 @@ export default function EmbedPage() {
               </div>
             )}
             {messages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.sender_type === 'customer' ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className="max-w-[80%] px-3 py-2 rounded-2xl text-sm leading-relaxed"
-                  style={{
-                    background: msg.sender_type === 'customer' ? accentColor : '#fff',
-                    color: msg.sender_type === 'customer' ? '#fff' : '#1f2937',
-                    borderBottomRightRadius: msg.sender_type === 'customer' ? '4px' : undefined,
-                    borderBottomLeftRadius: msg.sender_type !== 'customer' ? '4px' : undefined,
-                    boxShadow: msg.sender_type !== 'customer' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                  }}
-                >
-                  {msg.sender_type === 'agent' && msg.sender_name && (
-                    <p className="text-[10px] font-semibold mb-0.5 opacity-60">{msg.sender_name}</p>
-                  )}
-                  {msg.content}
-                </div>
+              <div key={msg.id} className={`flex ${msg.sender_type === 'customer' ? 'justify-end' : msg.sender_type === 'system' ? 'justify-center' : 'justify-start'}`}>
+                {msg.sender_type === 'system' ? (
+                  <span className="px-3 py-1 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full">
+                    {msg.content}
+                  </span>
+                ) : (
+                  <div
+                    className="max-w-[80%] px-3 py-2 rounded-2xl text-sm leading-relaxed"
+                    style={{
+                      background: msg.sender_type === 'customer' ? accentColor : '#fff',
+                      color: msg.sender_type === 'customer' ? '#fff' : '#1f2937',
+                      borderBottomRightRadius: msg.sender_type === 'customer' ? '4px' : undefined,
+                      borderBottomLeftRadius: msg.sender_type !== 'customer' ? '4px' : undefined,
+                      boxShadow: msg.sender_type !== 'customer' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                    }}
+                  >
+                    {msg.sender_type === 'agent' && msg.sender_name && (
+                      <p className="text-[10px] font-semibold mb-0.5 opacity-60">{msg.sender_name}</p>
+                    )}
+                    {msg.content}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -239,6 +257,123 @@ export default function EmbedPage() {
             </button>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+
+/* ── Field Renderer for advanced types ─────────────────────── */
+
+function FieldRenderer({
+  field,
+  value,
+  onChange,
+  allData,
+  onChangeAll,
+  accentColor,
+}: {
+  field: StarterField;
+  value: string;
+  onChange: (v: string) => void;
+  allData: Record<string, string>;
+  onChangeAll: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  accentColor: string;
+}) {
+  const inputClass = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400';
+
+  // Find active conditional follow-up
+  const activeConditional = (field.conditional || []).find(c => c.trigger_value === value);
+
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1">
+        {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
+      </label>
+
+      {/* text / email / phone */}
+      {(field.type === 'text' || field.type === 'email' || field.type === 'phone') && (
+        <input
+          type={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
+          required={field.required}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className={inputClass}
+          placeholder={field.label}
+        />
+      )}
+
+      {/* textarea */}
+      {field.type === 'textarea' && (
+        <textarea
+          required={field.required}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className={inputClass + ' resize-none h-20'}
+          placeholder={field.label}
+        />
+      )}
+
+      {/* select (dropdown) */}
+      {field.type === 'select' && (
+        <select
+          required={field.required}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className={inputClass + ' cursor-pointer'}
+        >
+          <option value="">Select...</option>
+          {(field.options || []).map(opt => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+      )}
+
+      {/* radio */}
+      {field.type === 'radio' && (
+        <div className="flex flex-wrap gap-2 mt-1">
+          {(field.options || []).map(opt => (
+            <label key={opt} className="flex items-center gap-1.5 cursor-pointer text-sm text-gray-700">
+              <input
+                type="radio"
+                name={field.key}
+                value={opt}
+                checked={value === opt}
+                onChange={() => onChange(opt)}
+                required={field.required && !value}
+                style={{ accentColor }}
+              />
+              {opt}
+            </label>
+          ))}
+        </div>
+      )}
+
+      {/* checkbox */}
+      {field.type === 'checkbox' && (
+        <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 mt-1">
+          <input
+            type="checkbox"
+            checked={value === 'true'}
+            onChange={e => onChange(e.target.checked ? 'true' : '')}
+            style={{ accentColor }}
+          />
+          {field.label}
+        </label>
+      )}
+
+      {/* Conditional follow-up field */}
+      {activeConditional && activeConditional.follow_up && (
+        <div className="mt-2 pl-3" style={{ borderLeft: `2px solid ${accentColor}` }}>
+          <FieldRenderer
+            field={{ ...activeConditional.follow_up, type: activeConditional.follow_up.type || 'text' }}
+            value={allData[activeConditional.follow_up.key] || ''}
+            onChange={(v) => onChangeAll(p => ({ ...p, [activeConditional.follow_up.key]: v }))}
+            allData={allData}
+            onChangeAll={onChangeAll}
+            accentColor={accentColor}
+          />
+        </div>
       )}
     </div>
   );

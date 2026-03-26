@@ -47,11 +47,12 @@ export default function ProfilePage() {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwError('');
+    if (!pwForm.current) { setPwError('Current password is required'); return; }
     if (pwForm.next !== pwForm.confirm) { setPwError('New passwords do not match'); return; }
     if (pwForm.next.length < 6) { setPwError('Password must be at least 6 characters'); return; }
     setIsSavingPw(true);
     try {
-      await agentApi.update(agent.id, { password: pwForm.next });
+      await agentApi.update(agent.id, { password: pwForm.next, current_password: pwForm.current });
       setPwForm({ current: '', next: '', confirm: '' });
       setPwSuccess(true);
       setTimeout(() => setPwSuccess(false), 3000);
@@ -188,6 +189,7 @@ export default function ProfilePage() {
 
           <form onSubmit={handleChangePassword} className="space-y-4">
             {[
+              { key: 'current', label: 'Current Password' },
               { key: 'next', label: 'New Password' },
               { key: 'confirm', label: 'Confirm New Password' },
             ].map(f => (

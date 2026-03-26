@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { adminApi, agentApi, integrationApi } from '@/lib/api';
 import { Agent, CannedResponse } from '@/lib/types';
@@ -94,7 +94,7 @@ export default function AdminPage() {
             <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>Admin Settings</h1>
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>System configuration and team management.</p>
           </div>
-          <div className="flex flex-wrap gap-1 p-1" style={{ background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-sm)' }}>
+          <div className="flex flex-nowrap overflow-x-auto gap-1 p-1" style={{ background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-sm)' }}>
             {(['settings', 'agents', 'canned', 'whatsapp', 'integration'] as const).map(tab => (
               <TabButton key={tab} active={activeTab === tab} onClick={() => setActiveTab(tab)}
                 label={tab === 'integration' ? 'Integration' : tab === 'canned' ? 'Canned Replies' : tab.charAt(0).toUpperCase() + tab.slice(1)} />
@@ -124,7 +124,7 @@ export default function AdminPage() {
 
 function TabButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (
-    <button onClick={onClick} className="px-4 py-2 text-sm font-semibold transition-all cursor-pointer" style={{
+    <button onClick={onClick} className="px-4 py-2 text-sm font-semibold transition-all cursor-pointer flex-shrink-0 whitespace-nowrap" style={{
       borderRadius: 'var(--radius-sm)',
       background: active ? 'var(--color-surface)' : 'transparent',
       color: active ? 'var(--color-primary)' : 'var(--color-text-muted)',
@@ -206,46 +206,169 @@ function SettingsTab({ settings, setSettings }: { settings: Record<string, strin
   );
 }
 
+interface StarterField {
+  label: string;
+  key: string;
+  required: boolean;
+  type: 'text' | 'email' | 'phone' | 'select' | 'checkbox' | 'textarea' | 'radio';
+  options?: string[];
+  conditional?: Array<{ trigger_value: string; follow_up: StarterField }>;
+}
+
+const FIELD_TYPES = [
+  { value: 'text', label: 'Text' },
+  { value: 'email', label: 'Email' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'select', label: 'Dropdown' },
+  { value: 'radio', label: 'Radio' },
+  { value: 'checkbox', label: 'Checkbox' },
+  { value: 'textarea', label: 'Textarea' },
+] as const;
+
 function StarterFieldsEditor({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  let fields: Array<{ label: string; key: string; required: boolean }> = [];
+  let fields: StarterField[] = [];
   try { fields = JSON.parse(value || '[]'); } catch { fields = []; }
 
-  const update = (updated: typeof fields) => onChange(JSON.stringify(updated));
-  const add = () => update([...fields, { label: '', key: '', required: false }]);
+  const update = (updated: StarterField[]) => onChange(JSON.stringify(updated));
+  const add = () => update([...fields, { label: '', key: '', required: false, type: 'text', options: [], conditional: [] }]);
   const remove = (i: number) => update(fields.filter((_, idx) => idx !== i));
   const setField = (i: number, prop: string, val: any) => {
     const next = fields.map((f, idx) => idx === i ? { ...f, [prop]: val } : f);
     update(next);
   };
 
+  const inputStyle = { borderColor: 'var(--color-border)', borderRadius: 'var(--radius-sm)', background: 'var(--color-bg)', color: 'var(--color-text)' };
+
   return (
     <div className="space-y-3">
       <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Form Fields</label>
       {fields.map((f, i) => (
-        <div key={i} className="flex items-center gap-2 p-3 rounded" style={{ background: 'var(--color-surface-alt)' }}>
-          <input
-            className="flex-1 px-2 py-1 text-xs border outline-none"
-            style={{ borderColor: 'var(--color-border)', borderRadius: 'var(--radius-sm)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-            placeholder="Label (e.g. Name)"
-            value={f.label}
-            onChange={e => setField(i, 'label', e.target.value)}
-          />
-          <input
-            className="w-28 px-2 py-1 text-xs border outline-none font-mono"
-            style={{ borderColor: 'var(--color-border)', borderRadius: 'var(--radius-sm)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-            placeholder="key"
-            value={f.key}
-            onChange={e => setField(i, 'key', e.target.value.toLowerCase().replace(/\s+/g, '_'))}
-          />
-          <label className="flex items-center gap-1 text-xs cursor-pointer" style={{ color: 'var(--color-text-muted)' }}>
-            <input type="checkbox" checked={f.required} onChange={e => setField(i, 'required', e.target.checked)} />
-            Req
-          </label>
-          <button type="button" onClick={() => remove(i)} style={{ color: 'var(--color-danger)' }}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+        <div key={i} className="p-3 rounded space-y-2" style={{ background: 'var(--color-surface-alt)' }}>
+          {/* Row 1: label, key, type, required, delete */}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="flex-1 min-w-[120px] px-2 py-1 text-xs border outline-none"
+              style={inputStyle}
+              placeholder="Label (e.g. Name)"
+              value={f.label}
+              onChange={e => setField(i, 'label', e.target.value)}
+            />
+            <input
+              className="w-24 px-2 py-1 text-xs border outline-none font-mono"
+              style={inputStyle}
+              placeholder="key"
+              value={f.key}
+              onChange={e => setField(i, 'key', e.target.value.toLowerCase().replace(/\s+/g, '_'))}
+            />
+            <select
+              className="px-2 py-1 text-xs border outline-none cursor-pointer"
+              style={inputStyle}
+              value={f.type}
+              onChange={e => {
+                const newType = e.target.value as StarterField['type'];
+                setField(i, 'type', newType);
+                if (!['select', 'radio'].includes(newType)) {
+                  setField(i, 'options', []);
+                  setField(i, 'conditional', []);
+                }
+              }}
+            >
+              {FIELD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <label className="flex items-center gap-1 text-xs cursor-pointer flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>
+              <input type="checkbox" checked={f.required} onChange={e => setField(i, 'required', e.target.checked)} />
+              Req
+            </label>
+            <button type="button" onClick={() => remove(i)} className="flex-shrink-0 cursor-pointer" style={{ color: 'var(--color-danger)' }}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Options editor for select/radio */}
+          {(f.type === 'select' || f.type === 'radio') && (
+            <div className="pl-3 space-y-1.5" style={{ borderLeft: '2px solid var(--color-border)' }}>
+              <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Options</span>
+              {(f.options || []).map((opt, oi) => (
+                <div key={oi} className="flex items-center gap-2">
+                  <input
+                    className="flex-1 px-2 py-1 text-xs border outline-none"
+                    style={inputStyle}
+                    placeholder={`Option ${oi + 1}`}
+                    value={opt}
+                    onChange={e => {
+                      const newOpts = [...(f.options || [])];
+                      newOpts[oi] = e.target.value;
+                      setField(i, 'options', newOpts);
+                    }}
+                  />
+                  <button type="button" className="text-[10px] cursor-pointer" style={{ color: 'var(--color-danger)' }}
+                    onClick={() => {
+                      const newOpts = (f.options || []).filter((_, idx) => idx !== oi);
+                      setField(i, 'options', newOpts);
+                      // Also remove conditionals referencing this option
+                      const newCond = (f.conditional || []).filter(c => c.trigger_value !== opt);
+                      setField(i, 'conditional', newCond);
+                    }}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button type="button"
+                className="text-[10px] font-semibold px-2 py-1 cursor-pointer"
+                style={{ color: 'var(--color-primary)', background: 'var(--color-primary-light)', borderRadius: 'var(--radius-sm)' }}
+                onClick={() => setField(i, 'options', [...(f.options || []), ''])}>
+                + Option
+              </button>
+
+              {/* Conditional follow-up builder */}
+              {(f.options || []).filter(o => o.trim()).length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Conditional Follow-ups</span>
+                  {(f.conditional || []).map((cond, ci) => (
+                    <div key={ci} className="flex flex-wrap items-center gap-2 p-2 rounded" style={{ background: 'var(--color-bg)' }}>
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>If</span>
+                      <select className="px-1 py-0.5 text-[10px] border outline-none cursor-pointer" style={inputStyle}
+                        value={cond.trigger_value}
+                        onChange={e => {
+                          const newCond = [...(f.conditional || [])];
+                          newCond[ci] = { ...newCond[ci], trigger_value: e.target.value };
+                          setField(i, 'conditional', newCond);
+                        }}>
+                        <option value="">Select...</option>
+                        {(f.options || []).filter(o => o.trim()).map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>then show:</span>
+                      <input className="flex-1 min-w-[80px] px-1 py-0.5 text-[10px] border outline-none" style={inputStyle}
+                        placeholder="Follow-up label"
+                        value={cond.follow_up?.label || ''}
+                        onChange={e => {
+                          const newCond = [...(f.conditional || [])];
+                          const key = (e.target.value || '').toLowerCase().replace(/\s+/g, '_');
+                          newCond[ci] = { ...newCond[ci], follow_up: { ...newCond[ci].follow_up, label: e.target.value, key, type: newCond[ci].follow_up?.type || 'text', required: false } };
+                          setField(i, 'conditional', newCond);
+                        }}
+                      />
+                      <button type="button" className="text-[10px] cursor-pointer" style={{ color: 'var(--color-danger)' }}
+                        onClick={() => {
+                          const newCond = (f.conditional || []).filter((_, idx) => idx !== ci);
+                          setField(i, 'conditional', newCond);
+                        }}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button"
+                    className="text-[10px] font-semibold px-2 py-1 cursor-pointer"
+                    style={{ color: '#8b5cf6', background: 'rgba(139,92,246,0.1)', borderRadius: 'var(--radius-sm)' }}
+                    onClick={() => setField(i, 'conditional', [...(f.conditional || []), { trigger_value: '', follow_up: { label: '', key: '', required: false, type: 'text' } }])}>
+                    + Conditional
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ))}
       <button type="button" onClick={add} className="text-xs font-semibold px-3 py-1.5 cursor-pointer" style={{
@@ -519,8 +642,8 @@ function CannedTab({ canned, setCanned }: { canned: CannedResponse[]; setCanned:
         </button>
       </div>
 
-      <div className="card overflow-hidden">
-        <table className="w-full border-collapse">
+      <div className="card overflow-hidden overflow-x-auto">
+        <table className="w-full border-collapse min-w-[500px]">
           <thead>
             <tr style={{ background: 'var(--color-surface-alt)' }}>
               {['Shortcut', 'Title', 'Content', ''].map(h => (
@@ -794,7 +917,7 @@ function IntegrationTab() {
   };
 
   const rotate = async (type: 'widget' | 'api') => {
-    if (!confirm(`Rotate the ${type === 'widget' ? 'Widget' : 'API'} key? All existing integrations using this key will break.`)) return;
+    if (!confirm(`Request a new ${type === 'widget' ? 'Widget' : 'API'} key? Your current key will be invalidated immediately.`)) return;
     setRotating(type);
     try {
       if (type === 'widget') {
@@ -869,9 +992,9 @@ function IntegrationTab() {
               </button>
               <button onClick={() => rotate('widget')} disabled={rotating === 'widget'} className="px-3 py-1.5 text-xs font-semibold cursor-pointer" style={{
                 borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)',
-                color: 'var(--color-danger)', opacity: rotating === 'widget' ? 0.5 : 1,
+                color: 'var(--color-primary)', opacity: rotating === 'widget' ? 0.5 : 1,
               }}>
-                {rotating === 'widget' ? '…' : 'Rotate'}
+                {rotating === 'widget' ? '…' : 'Request New Key'}
               </button>
             </div>
           </div>
@@ -904,9 +1027,9 @@ function IntegrationTab() {
               </button>
               <button onClick={() => rotate('api')} disabled={rotating === 'api'} className="px-3 py-1.5 text-xs font-semibold cursor-pointer" style={{
                 borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)',
-                color: 'var(--color-danger)', opacity: rotating === 'api' ? 0.5 : 1,
+                color: 'var(--color-primary)', opacity: rotating === 'api' ? 0.5 : 1,
               }}>
-                {rotating === 'api' ? '…' : 'Rotate'}
+                {rotating === 'api' ? '…' : 'Request New Key'}
               </button>
             </div>
           </div>

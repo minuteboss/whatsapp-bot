@@ -197,11 +197,18 @@ async def send_message(
     await db.flush()
     await db.commit()
 
-    # Broadcast
-    await ws_manager.broadcast_all({
+    # Broadcast to agent dashboards
+    msg_event = {
         "type": "message:new",
         "message": ConversationService._msg_dict(msg),
         "conversation": ConversationService._conv_dict(conv, last_message=content),
+    }
+    await ws_manager.broadcast_all(msg_event)
+
+    # Broadcast to widget client (so customer sees agent reply in real time)
+    await ws_manager.send_to_widget(conversation_id, {
+        "type": "message:new",
+        "message": msg_event["message"],
     })
 
     return ConversationService._msg_dict(msg)
@@ -339,6 +346,12 @@ async def resolve_conversation(
     await db.commit()
 
     await ws_manager.broadcast_all({
+        "type": "conversation:resolved",
+        "conversation": ConversationService._conv_dict(conv),
+    })
+
+    # Notify widget that conversation was resolved
+    await ws_manager.send_to_widget(conversation_id, {
         "type": "conversation:resolved",
         "conversation": ConversationService._conv_dict(conv),
     })

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models.agent import Agent
 from models.tenant import Tenant
-from middleware.auth import get_current_agent, require_admin, hash_password
+from middleware.auth import get_current_agent, require_admin, hash_password, verify_password
 from middleware.tenant import get_current_tenant
 from services.whatsapp_service import wa_service
 
@@ -107,7 +107,20 @@ async def update_agent(
             setattr(agent, key, data[key])
 
     if "password" in data and data["password"]:
-        if current_agent.role in ("admin", "superadmin") or agent_id == current_agent.id:
+        if agent_id == current_agent.id and current_agent.role not in ("admin", "superadmin"):
+            # Regular agents must verify current password before changing their own
+            current_pw = data.get("current_password", "")
+            if not current_pw or not verify_password(current_pw, agent.password_hash):
+                raise HTTPException(status_code=400, detail="Current password is incorrect")
+            agent.password_hash = hash_password(data["password"])
+        elif agent_id == current_agent.id:
+            # Admin/superadmin changing own password — also require current password
+            current_pw = data.get("current_password", "")
+            if not current_pw or not verify_password(current_pw, agent.password_hash):
+                raise HTTPException(status_code=400, detail="Current password is incorrect")
+            agent.password_hash = hash_password(data["password"])
+        elif current_agent.role in ("admin", "superadmin"):
+            # Admin resetting another agent's password — no current password needed
             agent.password_hash = hash_password(data["password"])
 
     await db.flush()

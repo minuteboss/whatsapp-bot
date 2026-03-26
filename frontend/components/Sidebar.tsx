@@ -6,13 +6,13 @@ import AgentStatusPill from './AgentStatusPill';
 import ConversationList from './ConversationList';
 import QueueBadge from './QueueBadge';
 
-export default function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => void }) {
+export default function Sidebar({ isOpen, toggle, onClose }: { isOpen: boolean; toggle: () => void; onClose?: () => void }) {
   const { state, dispatch } = useApp();
   const router = useRouter();
 
   const filterBtn = (filter: 'all' | 'queue' | 'mine' | 'resolved', label: string, badge?: React.ReactNode) => (
     <button
-      onClick={() => { dispatch({ type: 'SET_FILTER', filter }); router.push('/dashboard'); }}
+      onClick={() => { dispatch({ type: 'SET_FILTER', filter }); router.push('/dashboard'); onClose?.(); }}
       className="flex items-center justify-between px-3 py-2 text-sm transition-all cursor-pointer"
       style={{
         borderRadius: 'var(--radius-sm)',
@@ -26,9 +26,18 @@ export default function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: (
     </button>
   );
 
+  const navTo = (path: string) => {
+    router.push(path);
+    onClose?.();
+  };
+
   return (
     <aside
-      className={`${isOpen ? 'w-[280px]' : 'w-0'} transition-all duration-300 flex flex-col h-full overflow-hidden`}
+      className={`
+        ${isOpen ? 'w-[280px]' : 'w-0'}
+        transition-all duration-300 flex flex-col h-full overflow-hidden
+        fixed z-50 md:relative md:z-auto
+      `}
       style={{ background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)' }}
     >
       <div className="p-5 flex flex-col h-full min-w-[280px]">
@@ -42,11 +51,19 @@ export default function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: (
             </div>
             <span className="font-bold text-base tracking-tight" style={{ color: 'var(--color-text)' }}>Support</span>
           </div>
-          {!state.wsConnected && (
-            <span className="text-[10px] font-semibold px-2 py-0.5 animate-pulse" style={{ background: 'var(--color-warning-light)', color: 'var(--color-warning)', borderRadius: 'var(--radius-sm)' }}>
-              Reconnecting…
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {!state.wsConnected && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 animate-pulse" style={{ background: 'var(--color-warning-light)', color: 'var(--color-warning)', borderRadius: 'var(--radius-sm)' }}>
+                Reconnecting…
+              </span>
+            )}
+            {/* Mobile close button */}
+            <button onClick={onClose} className="md:hidden p-1 cursor-pointer" style={{ color: 'var(--color-text-muted)' }}>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* ── Agent Card ─────────────────────────────── */}
@@ -79,7 +96,7 @@ export default function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: (
         <div className="pt-3 mt-3 space-y-1" style={{ borderTop: '1px solid var(--color-border)' }}>
           {state.agent?.role === 'superadmin' && (
             <button
-              onClick={() => router.push('/dashboard/superadmin')}
+              onClick={() => navTo('/dashboard/superadmin')}
               className="w-full flex items-center space-x-3 px-3 py-2 transition-all cursor-pointer"
               style={{ borderRadius: 'var(--radius-sm)', color: 'var(--color-text-secondary)' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--color-surface-alt)'; }}
@@ -93,7 +110,7 @@ export default function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: (
           )}
           {(state.agent?.role === 'admin' || state.agent?.role === 'superadmin') && (
             <button
-              onClick={() => router.push('/dashboard/admin')}
+              onClick={() => navTo('/dashboard/admin')}
               className="w-full flex items-center space-x-3 px-3 py-2 transition-all cursor-pointer"
               style={{ borderRadius: 'var(--radius-sm)', color: 'var(--color-text-secondary)' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--color-surface-alt)'; }}
@@ -107,7 +124,7 @@ export default function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: (
             </button>
           )}
           <button
-            onClick={() => router.push('/dashboard/profile')}
+            onClick={() => navTo('/dashboard/profile')}
             className="w-full flex items-center space-x-3 px-3 py-2 transition-all cursor-pointer"
             style={{ borderRadius: 'var(--radius-sm)', color: 'var(--color-text-secondary)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--color-surface-alt)'; }}

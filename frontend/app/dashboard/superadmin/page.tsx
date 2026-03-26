@@ -87,10 +87,10 @@ export default function SuperAdminPage() {
             <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>Superadmin</h1>
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>System-wide management across all tenants.</p>
           </div>
-          <div className="flex p-1" style={{ background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-sm)' }}>
+          <div className="flex flex-nowrap overflow-x-auto p-1" style={{ background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-sm)' }}>
             {(['tenants', 'agents', 'conversations'] as const).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
-                className="px-4 py-2 text-sm font-semibold transition-all cursor-pointer capitalize"
+                className="px-4 py-2 text-sm font-semibold transition-all cursor-pointer capitalize flex-shrink-0 whitespace-nowrap"
                 style={{
                   borderRadius: 'var(--radius-sm)',
                   background: activeTab === tab ? 'var(--color-surface)' : 'transparent',
@@ -164,7 +164,7 @@ function TenantsTab() {
   return (
     <div className="space-y-6">
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[{ label: 'Total Tenants', value: tenants.length }, { label: 'Active', value: active }, { label: 'Inactive', value: tenants.length - active }].map(s => (
           <div key={s.label} className="card p-5">
             <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>{s.label}</p>
@@ -203,8 +203,8 @@ function TenantsTab() {
       {isLoading ? (
         <div className="card animate-pulse h-40" />
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full border-collapse">
+        <div className="card overflow-hidden overflow-x-auto">
+          <table className="w-full border-collapse min-w-[700px]">
             <thead>
               <tr style={{ background: 'var(--color-surface-alt)' }}>
                 {['Tenant', 'Slug', 'Plan', 'Limits', 'Agents', 'WhatsApp', 'Status', ''].map(h => (
@@ -341,7 +341,7 @@ function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: 
   };
 
   const rotate = async (type: 'widget' | 'api') => {
-    if (!confirm(`Rotate the ${type === 'widget' ? 'Widget' : 'API'} key? Existing integrations using this key will break.`)) return;
+    if (!confirm(`Request a new ${type === 'widget' ? 'Widget' : 'API'} key? Your current key will be invalidated immediately.`)) return;
     setRotating(type);
     try {
       if (type === 'widget') {
@@ -394,15 +394,15 @@ function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: 
 
       {/* Key rotation */}
       <div className="mt-6 pt-6 space-y-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>API Key Rotation</p>
+        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Key Management</p>
         <div className="flex gap-2">
           <button onClick={() => rotate('widget')} disabled={rotating === 'widget'} className="flex-1 py-2 text-xs font-semibold cursor-pointer"
-            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', color: 'var(--color-danger)', opacity: rotating === 'widget' ? 0.5 : 1 }}>
-            {rotating === 'widget' ? '…' : 'Rotate Widget Key'}
+            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', color: 'var(--color-primary)', opacity: rotating === 'widget' ? 0.5 : 1 }}>
+            {rotating === 'widget' ? '…' : 'Request New Widget Key'}
           </button>
           <button onClick={() => rotate('api')} disabled={rotating === 'api'} className="flex-1 py-2 text-xs font-semibold cursor-pointer"
-            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', color: 'var(--color-danger)', opacity: rotating === 'api' ? 0.5 : 1 }}>
-            {rotating === 'api' ? '…' : 'Rotate API Key'}
+            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', color: 'var(--color-primary)', opacity: rotating === 'api' ? 0.5 : 1 }}>
+            {rotating === 'api' ? '…' : 'Request New API Key'}
           </button>
         </div>
         {newKey && (
@@ -714,8 +714,8 @@ function ConversationsTab() {
       {isLoading ? (
         <div className="card animate-pulse h-48" />
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full border-collapse">
+        <div className="card overflow-hidden overflow-x-auto">
+          <table className="w-full border-collapse min-w-[600px]">
             <thead>
               <tr style={{ background: 'var(--color-surface-alt)' }}>
                 {['Customer', 'Tenant', 'Channel', 'Status', 'Last Message', ''].map(h => (

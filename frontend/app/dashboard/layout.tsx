@@ -19,6 +19,7 @@ export default function DashboardLayout({
   const { state, dispatch, handleWSEvent } = useApp();
   const { notify } = useNotifications();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   // Stable callbacks — must not be inline arrows or WS reconnects on every render
@@ -75,11 +76,40 @@ export default function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}>
-      {/* ── Sidebar ─────────────────────────────────── */}
-      <Sidebar isOpen={isSidebarOpen} toggle={() => setIsSidebarOpen(!isSidebarOpen)} />
+      {/* ── Mobile top bar ─────────────────────────── */}
+      <div className="fixed top-0 left-0 right-0 z-40 md:hidden flex items-center h-12 px-3 gap-3"
+        style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)' }}>
+        <button onClick={() => setMobileOpen(true)} className="p-1.5 cursor-pointer" style={{ color: 'var(--color-text)' }}>
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>Support</span>
+        {!state.wsConnected && (
+          <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 animate-pulse" style={{ background: 'var(--color-warning-light)', color: 'var(--color-warning)', borderRadius: 'var(--radius-sm)' }}>
+            Reconnecting…
+          </span>
+        )}
+      </div>
+
+      {/* ── Mobile backdrop ────────────────────────── */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/30 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      {/* ── Sidebar (desktop: controlled by isOpen, mobile: controlled by mobileOpen) ── */}
+      <div className="hidden md:flex">
+        <Sidebar isOpen={isSidebarOpen} toggle={() => setIsSidebarOpen(!isSidebarOpen)} />
+      </div>
+      <div className="md:hidden">
+        <Sidebar isOpen={mobileOpen} toggle={() => setMobileOpen(!mobileOpen)} onClose={() => setMobileOpen(false)} />
+      </div>
 
       {/* ── Main Chat Area ───────────────────────────── */}
-      <main className="flex-1 flex flex-col min-w-0" style={{ background: 'var(--color-surface)' }}>
+      <main className="flex-1 flex flex-col min-w-0 pt-12 md:pt-0" style={{ background: 'var(--color-surface)' }}>
         {children}
       </main>
 

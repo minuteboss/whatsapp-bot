@@ -12,13 +12,16 @@ logger = logging.getLogger(__name__)
 
 class WebSocketManager:
     """
-    Manages WebSocket connections for agent dashboards.
+    Manages WebSocket connections for agent dashboards and widget clients.
     Maps agent_id → list of WebSocket connections (an agent can have multiple tabs).
+    Maps conversation_id → list of WebSocket connections (widget clients).
     """
 
     def __init__(self):
         # agent_id -> list of WebSocket connections
         self._connections: dict[str, list[WebSocket]] = {}
+        # conversation_id -> list of WebSocket connections (widget clients)
+        self._widget_connections: dict[str, list[WebSocket]] = {}
 
     async def connect(self, agent_id: str, ws: WebSocket):
         """Register a new WebSocket connection for an agent."""
@@ -91,6 +94,43 @@ class WebSocketManager:
         for agent_id in list(self._connections.keys()):
             if agent_id != exclude_agent_id:
                 await self.send_to_agent(agent_id, event)
+
+    # ── Widget connections ────────────────────────────────────
+
+    async def connect_widget(self, conversation_id: str, ws: WebSocket):
+        """Register a widget WebSocket connection for a conversation."""
+        if conversation_id not in self._widget_connections:
+            self._widget_connections[conversation_id] = []
+        self._widget_connections[conversation_id].append(ws)
+        logger.info(f"Widget connected for conversation {conversation_id}")
+
+    def disconnect_widget(self, conversation_id: str, ws: WebSocket):
+        """Remove a widget WebSocket connection."""
+        if conversation_id in self._widget_connections:
+            try:
+                self._widget_connections[conversation_id].remove(ws)
+            except ValueError:
+                pass
+            if not self._widget_connections[conversation_id]:
+                del self._widget_connections[conversation_id]
+
+    async def send_to_widget(self, conversation_id: str, event: dict):
+        """Send an event to all widget connections for a conversation."""
+        if conversation_id not in self._widget_connections:
+            return
+        dead = []
+        for ws in self._widget_connections[conversation_id]:
+            try:
+                await ws.send_json(event)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            try:
+                self._widget_connections[conversation_id].remove(ws)
+            except ValueError:
+                pass
+        if conversation_id in self._widget_connections and not self._widget_connections[conversation_id]:
+            del self._widget_connections[conversation_id]
 
 
 # ── Singleton ─────────────────────────────────────────────────

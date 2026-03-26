@@ -5,6 +5,18 @@ import { format } from 'date-fns';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+const AVATAR_COLORS = [
+  '#2563eb', '#7c3aed', '#db2777', '#ea580c', '#0d9488', '#4f46e5', '#059669', '#d97706',
+];
+
+function hashColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
 export default function MessageBubble({
   message,
   showAvatar
@@ -34,12 +46,17 @@ export default function MessageBubble({
     <div className={`flex flex-col ${isAgent ? 'items-end' : 'items-start'} group animate-fade-in`}>
       <div className={`flex items-end space-x-2 max-w-[75%] ${isAgent ? 'flex-row-reverse space-x-reverse' : ''}`}>
         <div className={`w-6 h-6 rounded-full flex-shrink-0 mb-1 flex items-center justify-center text-[10px] font-bold text-white ${showAvatar ? 'opacity-100' : 'opacity-0'}`}
-          style={{ background: isAgent ? 'var(--color-primary)' : 'var(--color-text-muted)' }}
+          style={{ background: isAgent ? hashColor(message.sender_name || 'Agent') : 'var(--color-text-muted)' }}
         >
-          {isAgent ? 'A' : (message.sender_name?.charAt(0) || 'C')}
+          {isAgent ? (message.sender_name?.charAt(0) || 'A') : (message.sender_name?.charAt(0) || 'C')}
         </div>
 
         <div className="flex flex-col">
+          {showAvatar && isAgent && message.sender_name && (
+            <span className="text-[10px] font-semibold mb-0.5 px-1" style={{ color: hashColor(message.sender_name), textAlign: 'right' }}>
+              {message.sender_name}
+            </span>
+          )}
           <div className="px-4 py-2.5 text-sm" style={{
             borderRadius: isAgent ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
             background: isAgent ? 'var(--color-primary)' : 'var(--color-surface)',

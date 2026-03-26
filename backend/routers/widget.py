@@ -74,9 +74,15 @@ async def widget_start(
 
     tenant = await _get_tenant_by_slug_and_key(slug, key, db)
 
-    customer_name = fields.get("name", "Guest").strip()[:200] or "Guest"
-    customer_email = fields.get("email", "").strip()[:320] or None
-    customer_phone = fields.get("phone", "").strip()[:50] or None
+    # Map well-known field keys to Conversation columns
+    customer_name = str(fields.get("name", "Guest")).strip()[:200] or "Guest"
+    customer_email = str(fields.get("email", "")).strip()[:320] or None
+    customer_phone = str(fields.get("phone", "")).strip()[:50] or None
+
+    # Collect extra fields (beyond name/email/phone) as metadata JSON
+    well_known = {"name", "email", "phone"}
+    extra_fields = {k: v for k, v in fields.items() if k not in well_known and v}
+    source_page = json.dumps(extra_fields) if extra_fields else None
 
     conv = Conversation(
         channel="web_widget",
@@ -84,6 +90,7 @@ async def widget_start(
         customer_name=customer_name,
         customer_email=customer_email,
         customer_phone=customer_phone,
+        source_page=source_page,
         tenant_id=tenant.id,
     )
     db.add(conv)
@@ -99,7 +106,7 @@ async def widget_start(
         content_type="system_event",
     )
     db.add(welcome)
-    conv.last_message_at = datetime.now(timezone.utc)
+    conv.last_message_at = datetime.now(timezone.utc).replace(tzinfo=None).replace(tzinfo=None)
     await db.flush()
     await ConversationService.auto_assign(conv, db, tenant_id=tenant.id)
     await db.commit()
@@ -145,7 +152,7 @@ async def create_conversation(
         content_type="system_event",
     )
     db.add(welcome)
-    conv.last_message_at = datetime.now(timezone.utc)
+    conv.last_message_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.flush()
 
     # Auto-assign within tenant
@@ -192,7 +199,7 @@ async def send_widget_message(
         content_type="text",
     )
     db.add(msg)
-    conv.last_message_at = datetime.now(timezone.utc)
+    conv.last_message_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.flush()
     await db.commit()
 

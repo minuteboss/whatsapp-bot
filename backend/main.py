@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from config import settings
 from database import engine, Base, async_session
-from models import Tenant, Agent, Setting, CannedResponse
+from models import Tenant, Agent, Setting, CannedResponse, Conversation
 from middleware.auth import hash_password, decode_token, validate_ws_ticket
 from rate_limiter import limiter
 from services.websocket_manager import ws_manager
@@ -286,3 +286,105 @@ async def websocket_endpoint(websocket: WebSocket):
                     "agent_id": agent_id,
                     "status": "offline",
                 })
+
+
+# ── Widget WebSocket Endpoint ────────────────────────────────
+@app.websocket("/ws/widget/{conversation_id}")
+async def widget_websocket_endpoint(websocket: WebSocket, conversation_id: str):
+    """
+    Widget WebSocket — allows real-time messaging for embedded chat widgets.
+    Auth via `key` query param (widget_api_key).
+    """
+    key = websocket.query_params.get("key", "")
+    if not key:
+        await websocket.close(code=4001, reason="Missing key parameter")
+        return
+
+    # Validate key and conversation ownership
+    async with async_session() as db:
+        result = await db.execute(
+            select(Tenant).where(Tenant.widget_api_key == key, Tenant.is_active == True)
+        )
+        tenant = result.scalar_one_or_none()
+        if not tenant:
+            await websocket.close(code=4003, reason="Invalid widget key")
+            return
+
+        conv_result = await db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.tenant_id == tenant.id,
+            )
+        )
+        conv = conv_result.scalar_one_or_none()
+        if not conv:
+            await websocket.close(code=4004, reason="Conversation not found")
+            return
+
+    await websocket.accept()
+    await ws_manager.connect_widget(conversation_id, websocket)
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+
+            if msg_type == "typing":
+                # Broadcast customer typing to agents
+                await ws_manager.broadcast_all({
+                    "type": "typing",
+                    "conversation_id": conversation_id,
+                    "sender_type": "customer",
+                })
+
+            elif msg_type == "message":
+                # Customer sends a message via WS
+                content = (data.get("content") or "").strip()
+                if not content or len(content) > 4096:
+                    continue
+
+                from datetime import datetime, timezone
+                from models import Message
+                from services.conversation_service import ConversationService
+
+                async with async_session() as db:
+                    conv_result = await db.execute(
+                        select(Conversation).where(Conversation.id == conversation_id)
+                    )
+                    conv = conv_result.scalar_one_or_none()
+                    if not conv:
+                        continue
+
+                    msg = Message(
+                        conversation_id=conversation_id,
+                        tenant_id=conv.tenant_id,
+                        sender_type="customer",
+                        content=content,
+                        content_type="text",
+                    )
+                    db.add(msg)
+                    conv.last_message_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await db.flush()
+                    await db.commit()
+
+                    msg_event = {
+                        "type": "message:new",
+                        "message": ConversationService._msg_dict(msg),
+                        "conversation": ConversationService._conv_dict(conv, last_message=content),
+                    }
+
+                # Broadcast to agent dashboards
+                await ws_manager.broadcast_all(msg_event)
+
+                # Echo back to widget (confirm delivery)
+                await ws_manager.send_to_widget(conversation_id, {
+                    "type": "message:new",
+                    "message": msg_event["message"],
+                })
+
+    except WebSocketDisconnect:
+        logger.info(f"Widget disconnected for conversation {conversation_id}")
+    except Exception as e:
+        logger.error(f"Widget WS error: {e}")
+    finally:
+        ws_manager.disconnect_widget(conversation_id, websocket)
