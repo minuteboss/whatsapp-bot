@@ -88,6 +88,25 @@ class WhatsAppService:
             logger.error(f"Failed to send WA message: {e}")
             return None
 
+    async def get_phone_number_info(self, phone_number_id: str, tenant=None) -> dict:
+        """Fetch quality rating, limit tier, and display number from Meta Graph API."""
+        token = self._get_token(tenant)
+        if not token:
+            return {}
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{self.base_url}/{phone_number_id}",
+                    params={"fields": "quality_rating,messaging_limit_tier,display_phone_number,verified_name"},
+                    headers=self._headers(tenant),
+                    timeout=10,
+                )
+                if resp.is_success:
+                    return resp.json()
+        except Exception as e:
+            logger.warning(f"get_phone_number_info failed: {e}")
+        return {}
+
     async def mark_as_read(self, phone_number_id: str, wa_message_id: str, tenant=None):
         if not self._get_token(tenant):
             return

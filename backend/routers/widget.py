@@ -5,18 +5,114 @@ Tenant resolved via widget API key (x-api-key → Tenant.widget_api_key).
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
+import json
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 
 from database import get_db
-from models import Conversation, Message, Agent
+from models import Conversation, Message, Agent, Setting
 from models.tenant import Tenant
 from middleware.auth import verify_api_key
 from services.conversation_service import ConversationService
 from services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/api/v1/widget", tags=["widget"])
+
+
+async def _get_tenant_by_slug_and_key(slug: str, key: str, db: AsyncSession) -> Tenant:
+    """Look up a tenant by its slug + widget_api_key combination."""
+    result = await db.execute(
+        select(Tenant).where(Tenant.slug == slug, Tenant.widget_api_key == key, Tenant.is_active == True)
+    )
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=401, detail="Invalid slug or widget key")
+    return tenant
+
+
+async def _get_settings(tenant_id: str, db: AsyncSession) -> dict:
+    result = await db.execute(select(Setting).where(Setting.tenant_id == tenant_id))
+    rows = result.scalars().all()
+    return {s.key: s.value for s in rows}
+
+
+@router.get("/config/{slug}")
+async def widget_config(
+    slug: str,
+    key: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Public endpoint — returns tenant branding and starter config for the embed widget."""
+    tenant = await _get_tenant_by_slug_and_key(slug, key, db)
+    s = await _get_settings(tenant.id, db)
+    starter_fields = []
+    try:
+        starter_fields = json.loads(s.get("starter_fields", "[]"))
+    except Exception:
+        starter_fields = []
+    return {
+        "name": s.get("business_name", tenant.name),
+        "greeting": s.get("welcome_message", ""),
+        "away_message": s.get("away_message", ""),
+        "starter_enabled": s.get("starter_enabled", "false") == "true",
+        "starter_greeting": s.get("starter_greeting", ""),
+        "starter_fields": starter_fields,
+        "offline_collect_email": s.get("offline_collect_email", "false") == "true",
+    }
+
+
+@router.post("/start")
+async def widget_start(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Start a new widget conversation, with optional pre-chat form data."""
+    slug = data.get("slug", "")
+    key = data.get("key", "")
+    fields: dict = data.get("fields", {})
+
+    tenant = await _get_tenant_by_slug_and_key(slug, key, db)
+
+    customer_name = fields.get("name", "Guest").strip()[:200] or "Guest"
+    customer_email = fields.get("email", "").strip()[:320] or None
+    customer_phone = fields.get("phone", "").strip()[:50] or None
+
+    conv = Conversation(
+        channel="web_widget",
+        status="pending",
+        customer_name=customer_name,
+        customer_email=customer_email,
+        customer_phone=customer_phone,
+        tenant_id=tenant.id,
+    )
+    db.add(conv)
+    await db.flush()
+
+    s = await _get_settings(tenant.id, db)
+    welcome_text = s.get("welcome_message", "Chat started. An agent will be with you shortly.")
+    welcome = Message(
+        conversation_id=conv.id,
+        tenant_id=tenant.id,
+        sender_type="system",
+        content=welcome_text,
+        content_type="system_event",
+    )
+    db.add(welcome)
+    conv.last_message_at = datetime.now(timezone.utc)
+    await db.flush()
+    await ConversationService.auto_assign(conv, db, tenant_id=tenant.id)
+    await db.commit()
+
+    await ws_manager.broadcast_all({
+        "type": "conversation:new",
+        "conversation": ConversationService._conv_dict(conv),
+    })
+
+    return {
+        "conversation_id": conv.id,
+        "messages": [{"id": welcome.id, "sender_type": "system", "sender_name": None, "content": welcome.content, "created_at": str(welcome.created_at)}],
+    }
 
 
 @router.post("/conversations")

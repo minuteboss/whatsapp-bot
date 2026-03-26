@@ -9,6 +9,8 @@ import React, { createContext, useContext, useReducer, useCallback, ReactNode } 
 import { Agent, Conversation, Message, CannedResponse, WSEvent, ConversationFilter } from '@/lib/types';
 
 // ── State ────────────────────────────────────────────────────
+interface TypingEntry { name: string; ts: number }
+
 interface AppState {
   agent: Agent | null;
   conversations: Conversation[];
@@ -21,6 +23,8 @@ interface AppState {
   pendingCount: number;
   filter: ConversationFilter;
   wsConnected: boolean;
+  /** conversationId → who is typing */
+  typing: Record<string, TypingEntry>;
 }
 
 const initialState: AppState = {
@@ -35,6 +39,7 @@ const initialState: AppState = {
   pendingCount: 0,
   filter: 'all',
   wsConnected: false,
+  typing: {},
 };
 
 // ── Actions ──────────────────────────────────────────────────
@@ -53,7 +58,9 @@ type Action =
   | { type: 'SET_CANNED'; cannedResponses: CannedResponse[] }
   | { type: 'SET_PENDING_COUNT'; count: number }
   | { type: 'SET_FILTER'; filter: ConversationFilter }
-  | { type: 'SET_WS_CONNECTED'; connected: boolean };
+  | { type: 'SET_WS_CONNECTED'; connected: boolean }
+  | { type: 'SET_TYPING'; conversationId: string; name: string }
+  | { type: 'CLEAR_TYPING'; conversationId: string };
 
 function appReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -92,7 +99,10 @@ function appReducer(state: AppState, action: Action): AppState {
       if (action.message.conversation_id === state.activeConversationId) {
         const exists = state.messages.some(m => m.id === action.message.id);
         if (!exists) {
-          return { ...state, messages: [...state.messages, action.message] };
+          // Clear typing when message arrives
+          const typing = { ...state.typing };
+          delete typing[action.message.conversation_id];
+          return { ...state, messages: [...state.messages, action.message], typing };
         }
       }
       return state;
@@ -121,6 +131,16 @@ function appReducer(state: AppState, action: Action): AppState {
       return { ...state, filter: action.filter };
     case 'SET_WS_CONNECTED':
       return { ...state, wsConnected: action.connected };
+    case 'SET_TYPING':
+      return {
+        ...state,
+        typing: { ...state.typing, [action.conversationId]: { name: action.name, ts: Date.now() } },
+      };
+    case 'CLEAR_TYPING': {
+      const t = { ...state.typing };
+      delete t[action.conversationId];
+      return { ...state, typing: t };
+    }
     default:
       return state;
   }
@@ -162,6 +182,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         break;
       case 'auth:success':
         dispatch({ type: 'SET_WS_CONNECTED', connected: true });
+        break;
+      case 'typing':
+        if (event.conversation_id) {
+          dispatch({ type: 'SET_TYPING', conversationId: event.conversation_id, name: event.agent_name || 'Agent' });
+        }
         break;
     }
   }, []);

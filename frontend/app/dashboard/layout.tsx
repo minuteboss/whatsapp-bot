@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { useWebSocket } from '@/lib/websocket';
-import { authApi, setTenantId, conversationApi } from '@/lib/api';
+import { authApi, setTenantId, conversationApi, adminApi } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import InfoPanel from '@/components/InfoPanel';
+import { useNotifications } from '@/hooks/useNotifications';
 
 export default function DashboardLayout({
   children,
@@ -14,7 +15,9 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { state, dispatch, handleWSEvent } = useApp();
+  const { notify } = useNotifications();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mounted, setMounted] = useState(false);
 
@@ -28,10 +31,20 @@ export default function DashboardLayout({
   }, [dispatch]);
   const onDisconnect = useCallback(() => dispatch({ type: 'SET_WS_CONNECTED', connected: false }), [dispatch]);
 
+  // Wrap WS event handler to fire notifications on incoming customer messages
+  const onWSEvent = useCallback((event: any) => {
+    handleWSEvent(event);
+    if (event.type === 'new_message' && event.message?.sender_type === 'customer') {
+      const name = event.message.sender_name || 'Customer';
+      const preview = (event.message.content || '').slice(0, 80);
+      notify(name, preview);
+    }
+  }, [handleWSEvent, notify]);
+
   // Initialize WebSocket (ticket-based)
   const { sendTyping } = useWebSocket({
     enabled: !!state.agent,
-    onEvent: handleWSEvent,
+    onEvent: onWSEvent,
     onConnect,
     onDisconnect,
   });
@@ -43,6 +56,9 @@ export default function DashboardLayout({
       authApi.me().then((agent) => {
         setTenantId(agent.tenant_id ?? null);
         dispatch({ type: 'SET_AGENT', agent });
+        adminApi.listCanned().then((canned) => {
+          dispatch({ type: 'SET_CANNED', cannedResponses: canned });
+        }).catch(() => {});
       }).catch(() => {
         router.push('/login');
       });
@@ -67,8 +83,8 @@ export default function DashboardLayout({
         {children}
       </main>
 
-      {/* ── Info Panel ──────────────────────────────── */}
-      {state.activeConversationId && (
+      {/* ── Info Panel — only on the main dashboard route ── */}
+      {state.activeConversationId && pathname === '/dashboard' && (
         <aside className="w-[280px] hidden xl:flex flex-col" style={{ background: 'var(--color-bg)', borderLeft: '1px solid var(--color-border)' }}>
           <InfoPanel />
         </aside>

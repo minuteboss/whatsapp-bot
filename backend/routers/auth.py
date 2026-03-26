@@ -16,11 +16,13 @@ from middleware.auth import (
 )
 from middleware.tenant import get_current_tenant
 from models.tenant import Tenant
+from rate_limiter import limiter
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 @router.post("/login")
+@limiter.limit("10/minute")
 async def login(
     request: Request,
     response: Response,
@@ -37,6 +39,12 @@ async def login(
     agent = result.scalar_one_or_none()
 
     if not agent or not verify_password(password, agent.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Verify agent's tenant is active
+    tenant_result = await db.execute(select(Tenant).where(Tenant.id == agent.tenant_id))
+    tenant = tenant_result.scalar_one_or_none()
+    if not tenant or not tenant.is_active:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token({"sub": agent.id})

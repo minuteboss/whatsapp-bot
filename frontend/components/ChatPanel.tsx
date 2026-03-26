@@ -10,10 +10,24 @@ import TransferModal from './TransferModal';
 export default function ChatPanel() {
   const { state, dispatch } = useApp();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
 
   const conversation = state.conversations.find(c => c.id === state.activeConversationId);
+  const assignedAgent = conversation?.assigned_agent_id
+    ? state.agents.find(a => a.id === conversation.assigned_agent_id)
+    : null;
+  const typingInfo = state.activeConversationId ? state.typing[state.activeConversationId] : null;
+
+  // Auto-clear typing after 4 seconds of no update
+  useEffect(() => {
+    if (!typingInfo || !state.activeConversationId) return;
+    const id = setTimeout(() => {
+      dispatch({ type: 'CLEAR_TYPING', conversationId: state.activeConversationId! });
+    }, 4000);
+    return () => clearTimeout(id);
+  }, [typingInfo, state.activeConversationId, dispatch]);
 
   useEffect(() => {
     const fetchMessages = async () => {
@@ -30,40 +44,42 @@ export default function ChatPanel() {
         console.error('Failed to fetch messages:', err);
       }
     };
-
     fetchMessages();
-  // Re-fetch when conversation changes OR when WS reconnects (catch messages missed during disconnect)
   }, [state.activeConversationId, state.agent, state.wsConnected, dispatch]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [state.messages]);
+  }, [state.messages, typingInfo]);
+
+  // Close actions menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setIsActionsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const handleLoadMore = async () => {
     if (!state.activeConversationId || !state.hasMoreMessages || !state.nextCursor) return;
     try {
       const data = await conversationApi.get(state.activeConversationId, 50, state.nextCursor);
-      dispatch({
-        type: 'PREPEND_MESSAGES',
-        messages: data.messages,
-        hasMore: data.has_more,
-        nextCursor: data.next_cursor,
-      });
+      dispatch({ type: 'PREPEND_MESSAGES', messages: data.messages, hasMore: data.has_more, nextCursor: data.next_cursor });
     } catch (err) {
       console.error('Failed to load more messages:', err);
     }
   };
 
-  const handleAction = async (action: 'accept' | 'resolve') => {
+  const handleAction = async (action: 'accept' | 'resolve' | 'reopen') => {
     if (!state.activeConversationId) return;
     try {
-      if (action === 'accept') {
-        await conversationApi.accept(state.activeConversationId);
-      } else {
-        await conversationApi.resolve(state.activeConversationId);
-      }
+      if (action === 'accept') await conversationApi.accept(state.activeConversationId);
+      else if (action === 'resolve') await conversationApi.resolve(state.activeConversationId);
+      else await conversationApi.reopen(state.activeConversationId);
       setIsActionsOpen(false);
     } catch (err) {
       console.error(`Failed to ${action}:`, err);
@@ -75,27 +91,35 @@ export default function ChatPanel() {
   return (
     <div className="flex-1 flex flex-col h-full relative animate-fade-in" style={{ background: 'var(--color-surface)' }}>
       {/* ── Header ─────────────────────────────────── */}
-      <header className="h-16 px-5 flex items-center justify-between" style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-sm" style={{ background: 'var(--color-primary)' }}>
+      <header className="h-16 px-5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+        <div className="flex items-center space-x-3 min-w-0">
+          <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-white text-sm" style={{ background: 'var(--color-primary)' }}>
             {conversation.customer_name?.charAt(0) || 'G'}
           </div>
-          <div>
-            <h2 className="font-semibold text-sm" style={{ color: 'var(--color-text)' }}>
+          <div className="min-w-0">
+            <h2 className="font-semibold text-sm truncate" style={{ color: 'var(--color-text)' }}>
               {conversation.customer_name || 'Guest Customer'}
             </h2>
             <div className="flex items-center space-x-1.5">
-              <span className="w-1.5 h-1.5 rounded-full" style={{
-                background: conversation.status === 'active' ? 'var(--color-accent-green)' : 'var(--color-warning)',
+              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{
+                background: conversation.status === 'active' ? 'var(--color-accent-green)' : conversation.status === 'resolved' ? 'var(--color-text-muted)' : 'var(--color-warning)',
               }} />
               <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--color-text-muted)' }}>
                 {conversation.status === 'pending' ? 'Waiting' : conversation.channel}
               </span>
+              {assignedAgent && (
+                <>
+                  <span style={{ color: 'var(--color-border)' }}>·</span>
+                  <span className="text-[10px] font-medium truncate max-w-[100px]" style={{ color: 'var(--color-text-muted)' }}>
+                    {assignedAgent.name}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 flex-shrink-0">
           {conversation.status === 'pending' ? (
             <button
               onClick={() => handleAction('accept')}
@@ -105,7 +129,7 @@ export default function ChatPanel() {
               Accept Chat
             </button>
           ) : conversation.status === 'active' ? (
-            <div className="relative">
+            <div className="relative" ref={actionsRef}>
               <button
                 onClick={() => setIsActionsOpen(!isActionsOpen)}
                 className="p-2 transition-all cursor-pointer" style={{ borderRadius: 'var(--radius-sm)', color: 'var(--color-text-muted)' }}
@@ -134,9 +158,18 @@ export default function ChatPanel() {
               )}
             </div>
           ) : (
-            <span className="px-3 py-1 text-xs font-bold uppercase tracking-widest" style={{ background: 'var(--color-surface-alt)', color: 'var(--color-text-muted)', borderRadius: 'var(--radius-sm)' }}>
-              Resolved
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="px-3 py-1 text-xs font-bold uppercase tracking-widest" style={{ background: 'var(--color-surface-alt)', color: 'var(--color-text-muted)', borderRadius: 'var(--radius-sm)' }}>
+                Resolved
+              </span>
+              <button
+                onClick={() => handleAction('reopen')}
+                className="px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer"
+                style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)', borderRadius: 'var(--radius-sm)' }}
+              >
+                Reopen
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -162,7 +195,7 @@ export default function ChatPanel() {
           <MessageBubble
             key={msg.id}
             message={msg}
-            showAvatar={idx === 0 || state.messages[idx-1].sender_type !== msg.sender_type}
+            showAvatar={idx === 0 || state.messages[idx - 1].sender_type !== msg.sender_type}
           />
         ))}
         {state.messages.length === 0 && (
@@ -171,6 +204,20 @@ export default function ChatPanel() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
             </svg>
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Starting new session...</p>
+          </div>
+        )}
+
+        {/* Typing indicator */}
+        {typingInfo && (
+          <div className="flex items-end space-x-2 animate-fade-in">
+            <div className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--color-text-muted)' }}>
+              {typingInfo.name.charAt(0)}
+            </div>
+            <div className="px-4 py-3 flex items-center space-x-1" style={{ borderRadius: '16px 16px 16px 4px', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-text-muted)', animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-text-muted)', animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--color-text-muted)', animationDelay: '300ms' }} />
+            </div>
           </div>
         )}
       </div>

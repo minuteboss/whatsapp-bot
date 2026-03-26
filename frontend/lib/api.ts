@@ -131,5 +131,53 @@ export const adminApi = {
     apiFetch('/api/v1/admin/wa/verify-code', { method: 'POST', body: { phone_number_id: phoneNumberId, code } }),
 };
 
+// ── Superadmin ───────────────────────────────────────────────
+export const superadminApi = {
+  listTenants: () =>
+    apiFetch('/api/superadmin/tenants'),
+  createTenant: (data: any) =>
+    apiFetch('/api/superadmin/tenants', { method: 'POST', body: data }),
+  updateTenant: (id: string, data: any) =>
+    apiFetch(`/api/superadmin/tenants/${id}`, { method: 'PATCH', body: data }),
+  deleteTenant: (id: string) =>
+    apiFetch(`/api/superadmin/tenants/${id}`, { method: 'DELETE' }),
+  tenantStats: (id: string) =>
+    apiFetch(`/api/superadmin/tenants/${id}/stats`),
+  rotateWidgetKey: (id: string) =>
+    apiFetch(`/api/superadmin/tenants/${id}/rotate-widget-key`, { method: 'POST' }),
+  rotateApiKey: (id: string) =>
+    apiFetch(`/api/superadmin/tenants/${id}/rotate-api-key`, { method: 'POST' }),
+  // Tenant-scoped agent management
+  listTenantAgents: (tenantId: string) =>
+    apiFetch(`/api/superadmin/tenants/${tenantId}/agents`),
+  createTenantAgent: (tenantId: string, data: any) =>
+    apiFetch(`/api/superadmin/tenants/${tenantId}/agents`, { method: 'POST', body: data }),
+  updateTenantAgent: (tenantId: string, agentId: string, data: any) =>
+    apiFetch(`/api/superadmin/tenants/${tenantId}/agents/${agentId}`, { method: 'PATCH', body: data }),
+  deleteTenantAgent: (tenantId: string, agentId: string) =>
+    apiFetch(`/api/superadmin/tenants/${tenantId}/agents/${agentId}`, { method: 'DELETE' }),
+  // Cross-tenant conversations
+  listConversations: (params: Record<string, string>) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/api/superadmin/conversations${qs ? `?${qs}` : ''}`);
+  },
+};
+
+// ── Integration (admin views own tenant keys) ────────────────
+export const integrationApi = {
+  get: () =>
+    apiFetch('/api/v1/admin/integration'),
+  getUsage: () =>
+    apiFetch('/api/v1/admin/usage'),
+  rotateWidgetKey: () =>
+    apiFetch('/api/v1/admin/rotate-widget-key', { method: 'POST' }),
+  rotateApiKey: () =>
+    apiFetch('/api/v1/admin/rotate-api-key', { method: 'POST' }),
+  savePhone: (phoneNumberId: string) =>
+    apiFetch('/api/v1/admin/wa/save-phone', { method: 'POST', body: { phone_number_id: phoneNumberId } }),
+  updateCanned: (id: string, data: any) =>
+    apiFetch(`/api/v1/admin/canned/${id}`, { method: 'PATCH', body: data }),
+};
+
 export { ApiError };
 export default apiFetch;

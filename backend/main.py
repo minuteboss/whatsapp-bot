@@ -9,8 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 
@@ -18,6 +17,7 @@ from config import settings
 from database import engine, Base, async_session
 from models import Tenant, Agent, Setting, CannedResponse
 from middleware.auth import hash_password, decode_token, validate_ws_ticket
+from rate_limiter import limiter
 from services.websocket_manager import ws_manager
 
 # ── Routers ───────────────────────────────────────────────────
@@ -26,9 +26,6 @@ from routers import superadmin
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# ── Rate Limiter ──────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address)
 
 
 # ── Seed Data ─────────────────────────────────────────────────
@@ -239,12 +236,17 @@ async def websocket_endpoint(websocket: WebSocket):
             "status": "online",
         })
 
-        # Send queue count
+        # Send queue count — scoped to this agent's tenant
         async with async_session() as db:
             from sqlalchemy import func
             from models.conversation import Conversation
+            result2 = await db.execute(select(Agent).where(Agent.id == agent_id))
+            _agent = result2.scalar_one_or_none()
+            tenant_filter = [Conversation.status == "pending"]
+            if _agent and _agent.tenant_id:
+                tenant_filter.append(Conversation.tenant_id == _agent.tenant_id)
             pending_result = await db.execute(
-                select(func.count(Conversation.id)).where(Conversation.status == "pending")
+                select(func.count(Conversation.id)).where(*tenant_filter)
             )
             pending_count = pending_result.scalar() or 0
 
