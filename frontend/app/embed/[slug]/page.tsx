@@ -122,17 +122,42 @@ export default function EmbedPage() {
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!input.trim() || !conversationId || isSending) return;
+    if (!input.trim() || isSending) return;
+
     const text = input.trim();
     setInput('');
     setIsSending(true);
+
+    let activeConvId = conversationId;
+
+    // If no conversation yet, start one now
+    if (!activeConvId) {
+      try {
+        const res = await fetch(`${API_URL}/api/v1/widget/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug, key: widgetKey, fields: starterData }),
+        });
+        if (!res.ok) throw new Error('Failed to start conversation');
+        const data = await res.json();
+        activeConvId = data.conversation_id;
+        setConversationId(activeConvId);
+        if (data.messages) setMessages(data.messages);
+      } catch (err: any) {
+        setError(err.message || 'Failed to start chat');
+        setIsSending(false);
+        return;
+      }
+    }
+
     const tempId = `tmp_${Date.now()}`;
     setMessages(prev => [...prev, {
       id: tempId, sender_type: 'customer', sender_name: starterData.name || 'You',
       content: text, created_at: new Date().toISOString(),
     }]);
+
     try {
-      await fetch(`${API_URL}/api/v1/widget/conversations/${conversationId}/messages`, {
+      await fetch(`${API_URL}/api/v1/widget/conversations/${activeConvId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': widgetKey },
         body: JSON.stringify({ content: text }),

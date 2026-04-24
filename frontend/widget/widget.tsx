@@ -366,9 +366,38 @@ const Widget = () => {
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!input.trim() || !conversationId) return;
-    const content = input;
+    if (!input.trim() || isLoading) return;
+
+    const content = input.trim();
     setInput('');
+    setIsLoading(true);
+
+    let activeConvId = conversationId;
+
+    // If no conversation yet, start one now
+    if (!activeConvId) {
+      try {
+        const script = document.currentScript || document.querySelector('script[data-key]');
+        const slug = script?.getAttribute('data-slug') || window.location.pathname.split('/').pop();
+        const res = await fetch(`${API_URL}/api/v1/widget/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            slug,
+            key: API_KEY,
+            fields: { name, email }
+          })
+        });
+        const data = await res.json();
+        activeConvId = data.conversation_id;
+        setConversationId(activeConvId);
+        if (data.messages) setMessages(data.messages);
+      } catch (e) {
+        alert('Failed to connect. Please try again later.');
+        setIsLoading(false);
+        return;
+      }
+    }
 
     // Optimistic add
     const tempMsg: Message = {
@@ -380,7 +409,7 @@ const Widget = () => {
     setMessages(prev => [...prev, tempMsg]);
 
     try {
-      await fetch(`${API_URL}/api/v1/widget/conversations/${conversationId}/messages`, {
+      await fetch(`${API_URL}/api/v1/widget/conversations/${activeConvId}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -389,12 +418,14 @@ const Widget = () => {
         body: JSON.stringify({ content })
       });
       // Refresh messages to get server IDs
-      const res = await fetch(`${API_URL}/api/v1/widget/conversations/${conversationId}/messages`, {
+      const res = await fetch(`${API_URL}/api/v1/widget/conversations/${activeConvId}/messages`, {
         headers: { 'x-api-key': API_KEY }
       });
       const data = await res.json();
       setMessages(data);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); } finally {
+      setIsLoading(false);
+    }
   };
 
   const getMsgClass = (type: string) => {
