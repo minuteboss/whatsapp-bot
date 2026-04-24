@@ -22,6 +22,9 @@ interface TenantConfig {
   starter_greeting: string;
   offline_collect_email: boolean;
   away_message: string;
+  widget_primary_color: string;
+  widget_title: string;
+  widget_subtitle: string;
 }
 
 interface Message {
@@ -117,7 +120,8 @@ export default function EmbedPage() {
     }
   };
 
-  const handleSend = async () => {
+  const handleSend = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!input.trim() || !conversationId || isSending) return;
     const text = input.trim();
     setInput('');
@@ -158,18 +162,18 @@ export default function EmbedPage() {
     );
   }
 
-  const accentColor = '#2563eb';
+  const accentColor = config.widget_primary_color || '#2563eb';
 
   return (
     <div className="h-screen flex flex-col bg-white font-sans text-sm">
       {/* Header */}
       <div className="px-4 py-3 flex items-center space-x-3 text-white flex-shrink-0" style={{ background: accentColor }}>
         <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">
-          {config.name.charAt(0)}
+          {config.widget_title.charAt(0)}
         </div>
         <div>
-          <p className="font-semibold text-sm">{config.name}</p>
-          <p className="text-[10px] opacity-80">Support Chat</p>
+          <p className="font-semibold text-sm">{config.widget_title}</p>
+          <p className="text-[10px] opacity-80">{config.widget_subtitle}</p>
         </div>
       </div>
 
@@ -192,7 +196,7 @@ export default function EmbedPage() {
               />
             ))}
             <button type="submit" disabled={isStarting}
-              className="w-full py-2.5 text-white text-sm font-semibold rounded-lg"
+              className="w-full py-2.5 text-white text-sm font-semibold rounded-lg cursor-pointer"
               style={{ background: accentColor, opacity: isStarting ? 0.7 : 1 }}>
               {isStarting ? 'Starting…' : 'Start Chat'}
             </button>
@@ -236,26 +240,26 @@ export default function EmbedPage() {
             ))}
           </div>
 
-          <div className="px-3 py-2.5 border-t border-gray-100 flex items-center gap-2 bg-white flex-shrink-0">
+          <form onSubmit={handleSend} className="px-3 py-2.5 border-t border-gray-100 flex items-center gap-2 bg-white flex-shrink-0">
             <input
               type="text"
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
               placeholder="Type a message…"
               className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-full outline-none focus:border-blue-400"
+              style={{ caretColor: accentColor }}
             />
             <button
-              onClick={handleSend}
+              type="submit"
               disabled={!input.trim() || isSending}
-              className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-opacity"
+              className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-opacity cursor-pointer"
               style={{ background: accentColor, opacity: !input.trim() || isSending ? 0.4 : 1 }}
             >
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
             </button>
-          </div>
+          </form>
         </>
       )}
     </div>
@@ -296,8 +300,16 @@ function FieldRenderer({
         <input
           type={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
           required={field.required}
+          pattern={field.type === 'phone' ? "[0-9+]*" : undefined}
           value={value}
-          onChange={e => onChange(e.target.value)}
+          onChange={e => {
+            let val = e.target.value;
+            if (field.type === 'phone') {
+              val = val.replace(/[^0-9+]/g, '');
+              val = val.startsWith('+') ? '+' + val.slice(1).replace(/\+/g, '') : val.replace(/\+/g, '');
+            }
+            onChange(val);
+          }}
           className={inputClass}
           placeholder={field.label}
         />

@@ -21,7 +21,7 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(500), nullable=False)
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="agent")  # agent|admin|superadmin
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="agent")  # agent|support|sales|developer|admin|superadmin
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="offline")
     max_chats: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     api_key: Mapped[str | None] = mapped_column(String(200), unique=True, nullable=True)

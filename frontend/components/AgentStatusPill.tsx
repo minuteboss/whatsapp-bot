@@ -37,7 +37,7 @@ export default function AgentStatusPill() {
     }
   };
 
-  const current = statusConfig[state.agent.status];
+  const current = statusConfig[state.agent.status] || statusConfig.offline;
 
   return (
     <div ref={ref} className="relative">

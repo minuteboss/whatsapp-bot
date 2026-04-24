@@ -4,15 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node widget/build.js && next build",
+    "build:widget": "node widget/build.js",
     "start": "next start"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "date-fns": "^4.1.0",
-    "next": "16.1.6",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "next": "15.1.6",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
     "react-hook-form": "^7.71.2",
     "zod": "^4.3.6"
   },

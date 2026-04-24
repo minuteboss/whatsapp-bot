@@ -9,9 +9,9 @@ interface Message {
   created_at: string;
 }
 
-// ── Config ───────────────────────────────────────────────────
-const API_URL = (window as any).WA_WIDGET_API_URL || 'http://localhost:8000';
-const API_KEY = (window as any).WA_WIDGET_API_KEY || 'sk_replace_me';
+// ── Config (set during initialization from script tag data attributes) ──
+let API_URL = 'http://localhost:8000';
+let API_KEY = '';
 
 // ── Styles ────────────────────────────────────────────────────
 const STYLES = `
@@ -295,11 +295,24 @@ const Widget = () => {
   const [state, setState] = useState<'form' | 'chat'>('form');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [config, setConfig] = useState<any>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Determine slug from script tag or current URL if embed
+    const script = document.currentScript || document.querySelector('script[data-key]');
+    const slug = script?.getAttribute('data-slug') || window.location.pathname.split('/').pop();
+    if (slug && API_KEY) {
+      fetch(`${API_URL}/api/v1/widget/config/${slug}?key=${API_KEY}`)
+        .then(r => r.json())
+        .then(setConfig)
+        .catch(console.error);
+    }
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -327,20 +340,22 @@ const Widget = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/v1/widget/conversations`, {
+      const script = document.currentScript || document.querySelector('script[data-key]');
+      const slug = script?.getAttribute('data-slug') || window.location.pathname.split('/').pop();
+      const res = await fetch(`${API_URL}/api/v1/widget/start`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          customer_name: name,
-          customer_email: email,
-          source_page: window.location.href
+          slug,
+          key: API_KEY,
+          fields: { name, email }
         })
       });
       const data = await res.json();
-      setConversationId(data.id);
+      setConversationId(data.conversation_id);
+      if (data.messages) setMessages(data.messages);
       setState('chat');
     } catch (e) {
       alert('Failed to connect. Please try again later.');
@@ -349,7 +364,8 @@ const Widget = () => {
     }
   };
 
-  const handleSend = async () => {
+  const handleSend = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!input.trim() || !conversationId) return;
     const content = input;
     setInput('');
@@ -387,15 +403,17 @@ const Widget = () => {
     return 'wa-msg wa-msg-agent';
   };
 
+  const accentColor = config?.widget_primary_color || '#2563EB';
+
   return (
     <div className="wa-widget-container">
       {isOpen && (
         <div className="wa-chat-window">
           {/* Header */}
-          <div className="wa-header">
+          <div className="wa-header" style={{ background: accentColor }}>
             <div>
-              <div className="wa-header-title">Support Chat</div>
-              <div className="wa-header-subtitle">We typically reply in minutes</div>
+              <div className="wa-header-title">{config?.widget_title || 'Support Chat'}</div>
+              <div className="wa-header-subtitle">{config?.widget_subtitle || 'We typically reply in minutes'}</div>
             </div>
             <button className="wa-close-btn" onClick={() => setIsOpen(false)}>
               <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -408,7 +426,7 @@ const Widget = () => {
             {state === 'form' ? (
               <div className="wa-form">
                 <h4>Hi there! 👋</h4>
-                <p>Tell us who you are so we can help you better.</p>
+                <p>{config?.starter_greeting || 'Tell us who you are so we can help you better.'}</p>
                 <form onSubmit={handleStart}>
                   <input
                     className="wa-input"
@@ -425,7 +443,7 @@ const Widget = () => {
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                   />
-                  <button className="wa-submit-btn" disabled={isLoading}>
+                  <button className="wa-submit-btn" disabled={isLoading} style={{ background: accentColor }}>
                     {isLoading ? 'Connecting...' : 'Start Chat →'}
                   </button>
                 </form>
@@ -441,34 +459,33 @@ const Widget = () => {
                     </div>
                   )}
                   {messages.map(m => (
-                    <div key={m.id} className={getMsgClass(m.sender_type)}>
+                    <div key={m.id} className={getMsgClass(m.sender_type)} style={m.sender_type === 'customer' ? { background: accentColor } : {}}>
                       {m.content}
                     </div>
                   ))}
                 </div>
-                <div className="wa-reply-bar">
+                <form className="wa-reply-bar" onSubmit={handleSend}>
                   <input
                     className="wa-reply-input"
                     placeholder="Type a message..."
                     value={input}
                     onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleSend()}
                   />
-                  <button className="wa-send-btn" onClick={handleSend} disabled={!input.trim()}>
+                  <button className="wa-send-btn" type="submit" disabled={!input.trim()} style={{ background: accentColor }}>
                     <svg viewBox="0 0 24 24">
                       <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
                     </svg>
                   </button>
-                </div>
+                </form>
               </>
             )}
           </div>
 
-          <div className="wa-powered">Powered by MinuteBoss</div>
+          <div className="wa-powered">Powered by AfricaCloudSpace</div>
         </div>
       )}
 
-      <button className="wa-launcher" onClick={() => setIsOpen(!isOpen)}>
+      <button className="wa-launcher" onClick={() => setIsOpen(!isOpen)} style={{ background: accentColor }}>
         {isOpen ? (
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         ) : (
@@ -480,6 +497,19 @@ const Widget = () => {
 };
 
 // ── App Initialization ───────────────────────────────────────
+const scriptTag = document.currentScript || document.querySelector('script[data-key]');
+if (scriptTag) {
+  API_KEY = scriptTag.getAttribute('data-key') || '';
+  API_URL = scriptTag.getAttribute('data-api-url') || API_URL;
+}
+// Also support legacy global variables
+if (!API_KEY && (window as any).WA_WIDGET_API_KEY) {
+  API_KEY = (window as any).WA_WIDGET_API_KEY;
+}
+if ((window as any).WA_WIDGET_API_URL) {
+  API_URL = (window as any).WA_WIDGET_API_URL;
+}
+
 const container = document.createElement('div');
 container.id = 'wa-widget-root';
 document.body.appendChild(container);

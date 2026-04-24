@@ -10,7 +10,9 @@ export default function ConversationList() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const filteredConversations = state.conversations.filter((c) => {
+  const conversations = Array.isArray(state.conversations) ? state.conversations : [];
+  
+  const filteredConversations = conversations.filter((c) => {
     if (state.filter === 'queue') return c.status === 'pending';
     if (state.filter === 'mine') return c.assigned_agent_id === state.agent?.id && c.status === 'active';
     if (state.filter === 'resolved') return c.status === 'resolved';

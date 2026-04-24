@@ -33,10 +33,16 @@ class Base(DeclarativeBase):
 
 # ── FastAPI dependency ────────────────────────────────────────
 async def get_db():
+    """FastAPI dependency for database sessions.
+
+    Note: Does NOT auto-commit. Routers are responsible for calling commit().
+    This prevents double-commit issues and gives explicit control to route handlers.
+    """
     async with async_session() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise
+        finally:
+            await session.close()

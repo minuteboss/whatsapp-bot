@@ -68,7 +68,7 @@ async def create_agent(
         name=name,
         email=email,
         password_hash=hash_password(password),
-        role=role if role in ("agent", "admin") else "agent",
+        role=role if role in ("agent", "support", "sales", "developer", "admin") else "agent",
         tenant_id=tenant.id,
         api_key=f"sk_{secrets.token_hex(32)}",
         max_chats=data.get("max_chats", tenant.max_chats_per_agent),

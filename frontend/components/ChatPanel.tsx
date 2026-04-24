@@ -2,19 +2,25 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/context/AppContext';
-import { conversationApi } from '@/lib/api';
+import { conversationApi, contactApi } from '@/lib/api';
+import { useNotifications } from '@/hooks/useNotifications';
 import MessageBubble from './MessageBubble';
 import ReplyBar from './ReplyBar';
 import TransferModal from './TransferModal';
 
 export default function ChatPanel() {
   const { state, dispatch } = useApp();
+  const { notify } = useNotifications();
   const scrollRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
 
-  const conversation = state.conversations.find(c => c.id === state.activeConversationId);
+  // Track fetched conversations to avoid re-fetching on ws reconnects
+  const fetchedConvRef = useRef<string | null>(null);
+
+  const conversations = Array.isArray(state.conversations) ? state.conversations : [];
+  const conversation = conversations.find(c => c.id === state.activeConversationId);
   const assignedAgent = conversation?.assigned_agent_id
     ? state.agents.find(a => a.id === conversation.assigned_agent_id)
     : null;
@@ -32,6 +38,13 @@ export default function ChatPanel() {
   useEffect(() => {
     const fetchMessages = async () => {
       if (!state.activeConversationId || !state.agent) return;
+
+      // Skip if we already fetched for this conversation
+      // (prevents re-fetch on ws reconnects)
+      if (fetchedConvRef.current === state.activeConversationId) {
+        return;
+      }
+
       try {
         const data = await conversationApi.get(state.activeConversationId);
         dispatch({
@@ -40,12 +53,13 @@ export default function ChatPanel() {
           hasMore: data.has_more,
           nextCursor: data.next_cursor,
         });
+        fetchedConvRef.current = state.activeConversationId;
       } catch (err) {
         console.error('Failed to fetch messages:', err);
       }
     };
     fetchMessages();
-  }, [state.activeConversationId, state.agent, state.wsConnected, dispatch]);
+  }, [state.activeConversationId, state.agent]); // Removed wsConnected and dispatch to prevent re-fetch loops
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -93,13 +107,45 @@ export default function ChatPanel() {
       {/* ── Header ─────────────────────────────────── */}
       <header className="h-16 px-5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
         <div className="flex items-center space-x-3 min-w-0">
+          <button
+            onClick={() => dispatch({ type: 'SET_ACTIVE_CONVERSATION', id: null })}
+            className="p-1.5 -ml-1.5 hover:bg-slate-50 rounded-full transition-colors cursor-pointer text-slate-400 hover:text-slate-600"
+            title="Back to Inbox"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
           <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-white text-sm" style={{ background: 'var(--color-primary)' }}>
             {conversation.customer_name?.charAt(0) || 'G'}
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-sm truncate" style={{ color: 'var(--color-text)' }}>
-              {conversation.customer_name || 'Guest Customer'}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-bold text-sm truncate" style={{ color: 'var(--color-text)' }}>
+                {conversation.customer_name || conversation.customer_phone}
+              </h2>
+              {(!conversation.customer_name || conversation.customer_name === conversation.customer_phone) && (
+                <button
+                  onClick={async () => {
+                    const name = prompt('Enter contact name:', conversation.customer_phone ?? '');
+                    if (!name) return;
+                    try {
+                      let phone = conversation.customer_phone;
+                      if (phone && !phone.startsWith('+')) phone = '+' + phone;
+                      await contactApi.create({ name, phone });
+                      notify('Success', 'Contact added');
+                      // Refresh conversations to see name change?
+                      // For now just notify, reload handled by WS usually or manual refresh.
+                    } catch (err: any) {
+                      notify('Error', 'Failed to add contact');
+                    }
+                  }}
+                  className="px-2 py-0.5 text-[9px] font-black uppercase tracking-tighter bg-primary-light text-primary rounded border border-primary/20 hover:bg-primary hover:text-white transition-all cursor-pointer"
+                >
+                  + Add to Contacts
+                </button>
+              )}
+            </div>
             <div className="flex items-center space-x-1.5">
               <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{
                 background: conversation.status === 'active' ? 'var(--color-accent-green)' : conversation.status === 'resolved' ? 'var(--color-text-muted)' : 'var(--color-warning)',

@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(grep -r \"widget\\\\.tsx\\\\|widget\\\\.js\\\\|from.*widget\\\\|import.*widget\" /c/Users/HP/Desktop/WHATSAPP/frontend --include=*.ts --include=*.tsx --include=*.js --include=*.json)",
+      "Bash(grep -r \"widget\\\\.js\\\\|widget\\\\.tsx\\\\|build\\\\.js\" /c/Users/HP/Desktop/WHATSAPP/frontend --include=*.json --include=*.js --include=*.ts)",
+      "Bash(grep -r \"AgentCreate\\\\|AgentUpdate\\\\|AgentResponse\\\\|WAConnectInitiate\\\\|WAConnectVerify\" /c/Users/HP/Desktop/WHATSAPP/backend --include=*.py)",
+      "Bash(grep -r public/ /c/Users/HP/Desktop/WHATSAPP/frontend --include=*.tsx --include=*.ts --include=*.jsx --include=*.js)",
+      "Bash(find c:/Users/HP/Desktop/WHATSAPP/backend -type d -name \"__pycache__\" -exec rm -rf {} +)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\HP\\Desktop\\WHATSAPP"
     ]
   }
 }

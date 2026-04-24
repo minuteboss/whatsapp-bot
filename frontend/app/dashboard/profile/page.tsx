@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { agentApi } from '@/lib/api';
+import { agentApi, authApi } from '@/lib/api';
 import WhatsAppConnectModal from '@/components/WhatsAppConnectModal';
 
 export default function ProfilePage() {
   const { state, dispatch } = useApp();
+  const router = useRouter();
   const [showConnect, setShowConnect] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -264,6 +266,29 @@ export default function ProfilePage() {
             <span className="text-[10px] px-2 py-1 rounded" style={{ background: 'var(--color-surface-alt)', color: 'var(--color-text-muted)' }}>Read-only</span>
           </div>
         )}
+
+        {/* ── Log Out ─────────────────────────────────── */}
+        <button
+          onClick={async () => {
+            try { await authApi.logout(); } catch {}
+            dispatch({ type: 'LOGOUT' });
+            router.push('/login');
+          }}
+          className="w-full py-3 flex items-center justify-center gap-2 text-sm font-semibold cursor-pointer transition-all"
+          style={{
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid rgba(239, 68, 68, 0.2)',
+            color: '#ef4444',
+            background: 'rgba(239, 68, 68, 0.04)',
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(239, 68, 68, 0.1)'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(239, 68, 68, 0.04)'; }}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          Log Out
+        </button>
       </div>
 
       {showConnect && <WhatsAppConnectModal onClose={() => setShowConnect(false)} />}

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { useWebSocket } from '@/lib/websocket';
-import { authApi, setTenantId, conversationApi, adminApi } from '@/lib/api';
+import { authApi, setTenantId, conversationApi, adminApi, agentApi } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import InfoPanel from '@/components/InfoPanel';
 import { useNotifications } from '@/hooks/useNotifications';
@@ -26,8 +26,8 @@ export default function DashboardLayout({
   const onConnect = useCallback(() => {
     dispatch({ type: 'SET_WS_CONNECTED', connected: true });
     // Re-fetch conversations on every (re)connect to catch messages missed during disconnect
-    conversationApi.list({}).then((convs) => {
-      dispatch({ type: 'SET_CONVERSATIONS', conversations: convs });
+    conversationApi.list({}).then((convs: any) => {
+      dispatch({ type: 'SET_CONVERSATIONS', conversations: convs.items || convs || [] });
     }).catch(() => {});
   }, [dispatch]);
   const onDisconnect = useCallback(() => dispatch({ type: 'SET_WS_CONNECTED', connected: false }), [dispatch]);
@@ -52,19 +52,37 @@ export default function DashboardLayout({
 
   useEffect(() => {
     setMounted(true);
-    // Try to restore session from cookie
+    
+    // 1. Session restoration (if agent is missing)
     if (!state.agent) {
       authApi.me().then((agent) => {
         setTenantId(agent.tenant_id ?? null);
         dispatch({ type: 'SET_AGENT', agent });
-        adminApi.listCanned().then((canned) => {
-          dispatch({ type: 'SET_CANNED', cannedResponses: canned });
-        }).catch(() => {});
       }).catch(() => {
         router.push('/login');
       });
+      return;
     }
-  }, [state.agent, router, dispatch]);
+
+    // 2. Data initialization (once agent is present)
+    if (state.agent) {
+      // Always sync the API module tenant ID
+      setTenantId(state.agent.tenant_id ?? null);
+
+      // Fetch lists if empty
+      if (state.cannedResponses.length === 0) {
+        adminApi.listCanned().then((canned) => {
+          dispatch({ type: 'SET_CANNED', cannedResponses: canned });
+        }).catch(() => {});
+      }
+      
+      if (state.agents.length === 0) {
+        agentApi.list().then((agents) => {
+          dispatch({ type: 'SET_AGENTS', agents });
+        }).catch(() => {});
+      }
+    }
+  }, [state.agent, state.cannedResponses.length, state.agents.length, router, dispatch]);
 
   if (!mounted || !state.agent) {
     return (
@@ -109,7 +127,7 @@ export default function DashboardLayout({
       </div>
 
       {/* ── Main Chat Area ───────────────────────────── */}
-      <main className="flex-1 flex flex-col min-w-0 pt-12 md:pt-0" style={{ background: 'var(--color-surface)' }}>
+      <main className="flex-1 flex flex-col min-w-0 pt-12 md:pt-0 overflow-y-auto" style={{ background: 'var(--color-surface)' }}>
         {children}
       </main>
 

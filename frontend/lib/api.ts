@@ -161,6 +161,19 @@ export const superadminApi = {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/api/superadmin/conversations${qs ? `?${qs}` : ''}`);
   },
+  impersonate: (agentId: string) =>
+    apiFetch(`/api/superadmin/impersonate/${agentId}`, { method: 'POST' }),
+  // Package management
+  listPackages: () =>
+    apiFetch('/api/superadmin/packages'),
+  createPackage: (data: any) =>
+    apiFetch('/api/superadmin/packages', { method: 'POST', body: data }),
+  updatePackage: (id: string, data: any) =>
+    apiFetch(`/api/superadmin/packages/${id}`, { method: 'PATCH', body: data }),
+  deletePackage: (id: string) =>
+    apiFetch(`/api/superadmin/packages/${id}`, { method: 'DELETE' }),
+  assignPackage: (tenantId: string, data: any) =>
+    apiFetch(`/api/superadmin/tenants/${tenantId}/assign-package`, { method: 'POST', body: data }),
 };
 
 // ── Integration (admin views own tenant keys) ────────────────
@@ -177,6 +190,86 @@ export const integrationApi = {
     apiFetch('/api/v1/admin/wa/save-phone', { method: 'POST', body: { phone_number_id: phoneNumberId } }),
   updateCanned: (id: string, data: any) =>
     apiFetch(`/api/v1/admin/canned/${id}`, { method: 'PATCH', body: data }),
+};
+
+// ── Subtenants (Reseller) ────────────────────────────────────
+export const subtenantApi = {
+  list: () =>
+    apiFetch('/api/v1/admin/sub-tenants'),
+  create: (data: any) =>
+    apiFetch('/api/v1/admin/sub-tenants', { method: 'POST', body: data }),
+  get: (id: string) =>
+    apiFetch(`/api/v1/admin/sub-tenants/${id}`),
+  update: (id: string, data: any) =>
+    apiFetch(`/api/v1/admin/sub-tenants/${id}`, { method: 'PATCH', body: data }),
+  delete: (id: string) =>
+    apiFetch(`/api/v1/admin/sub-tenants/${id}`, { method: 'DELETE' }),
+  listAgents: (id: string) =>
+    apiFetch(`/api/v1/admin/sub-tenants/${id}/agents`),
+  createAgent: (id: string, data: any) =>
+    apiFetch(`/api/v1/admin/sub-tenants/${id}/agents`, { method: 'POST', body: data }),
+  updateAgent: (id: string, agentId: string, data: any) =>
+    apiFetch(`/api/v1/admin/sub-tenants/${id}/agents/${agentId}`, { method: 'PATCH', body: data }),
+  deleteAgent: (id: string, agentId: string) =>
+    apiFetch(`/api/v1/admin/sub-tenants/${id}/agents/${agentId}`, { method: 'DELETE' }),
+  impersonate: (id: string, agentId: string) =>
+    apiFetch(`/api/v1/admin/sub-tenants/${id}/agents/${agentId}/impersonate`, { method: 'POST' }),
+};
+
+// ── Contacts ─────────────────────────────────────────────────
+export const contactApi = {
+  list: (params: Record<string, any> = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/api/v1/admin/contacts?${qs}`);
+  },
+  create: (data: any) =>
+    apiFetch('/api/v1/admin/contacts', { method: 'POST', body: data }),
+  update: (id: string, data: any) =>
+    apiFetch(`/api/v1/admin/contacts/${id}`, { method: 'PATCH', body: data }),
+  delete: (id: string) =>
+    apiFetch(`/api/v1/admin/contacts/${id}`, { method: 'DELETE' }),
+  importCsv: (data: any[]) =>
+    apiFetch('/api/v1/admin/contacts/import-csv', { method: 'POST', body: data }),
+};
+
+// ── Templates ────────────────────────────────────────────────
+export const templateApi = {
+  list: () =>
+    apiFetch('/api/v1/admin/templates'),
+  sync: () =>
+    apiFetch('/api/v1/admin/templates/sync', { method: 'POST' }),
+  create: (data: any) =>
+    apiFetch('/api/v1/admin/templates', { method: 'POST', body: data }),
+  update: (id: string, data: any) =>
+    apiFetch(`/api/v1/admin/templates/${id}`, { method: 'PATCH', body: data }),
+  deleteLocal: (id: string) =>
+    apiFetch(`/api/v1/admin/templates/${id}`, { method: 'DELETE' }),
+};
+
+// ── Broadcasts ───────────────────────────────────────────────
+export const broadcastApi = {
+  list: () =>
+    apiFetch('/api/v1/admin/broadcasts'),
+  get: (id: string) =>
+    apiFetch(`/api/v1/admin/broadcasts/${id}`),
+  create: (data: any) =>
+    apiFetch('/api/v1/admin/broadcasts', { method: 'POST', body: data }),
+  delete: (id: string) =>
+    apiFetch(`/api/v1/admin/broadcasts/${id}`, { method: 'DELETE' }),
+};
+
+// ── Groups ───────────────────────────────────────────────────
+export const groupApi = {
+  list: () =>
+    apiFetch('/api/v1/admin/groups'),
+  create: (data: any) =>
+    apiFetch('/api/v1/admin/groups', { method: 'POST', body: data }),
+  delete: (id: string) =>
+    apiFetch(`/api/v1/admin/groups/${id}`, { method: 'DELETE' }),
+  addMembers: (groupId: string, contactIds: string[]) =>
+    apiFetch(`/api/v1/admin/groups/${groupId}/members`, { method: 'POST', body: { contact_ids: contactIds } }),
+  removeMember: (groupId: string, contactId: string) =>
+    apiFetch(`/api/v1/admin/groups/${groupId}/members/${contactId}`, { method: 'DELETE' }),
 };
 
 export { ApiError };

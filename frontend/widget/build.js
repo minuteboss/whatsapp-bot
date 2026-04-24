@@ -5,7 +5,7 @@ async function build() {
     entryPoints: ['widget/widget.tsx'],
     bundle: true,
     minify: true,
-    outfile: '../public/widget.js',
+    outfile: 'public/widget.js',
     define: {
       'process.env.NODE_ENV': '"production"',
     },

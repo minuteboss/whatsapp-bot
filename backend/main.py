@@ -5,24 +5,27 @@ Mounts all routers, CORS, rate limiting, WebSocket, seed data.
 
 import logging
 import secrets
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 
 from config import settings
 from database import engine, Base, async_session
-from models import Tenant, Agent, Setting, CannedResponse, Conversation
+from models import Tenant, Agent, Setting, CannedResponse, Conversation, Message
 from middleware.auth import hash_password, decode_token, validate_ws_ticket
 from rate_limiter import limiter
 from services.websocket_manager import ws_manager
 
 # ── Routers ───────────────────────────────────────────────────
 from routers import auth, agents, conversations, widget, webhook, admin
-from routers import superadmin
+from routers import superadmin, admin_subtenants, admin_contacts, admin_templates, admin_broadcasts, admin_groups
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,7 +46,6 @@ async def seed_data():
             default_tenant = Tenant(
                 name="Default",
                 slug="default",
-                plan="enterprise",
                 max_agents=50,
                 max_chats_per_agent=10,
                 widget_api_key=widget_key,
@@ -54,11 +56,15 @@ async def seed_data():
             tenant_id = default_tenant.id
             api_key = f"sk_{secrets.token_hex(32)}"
 
+            # Generate secure random passwords (displayed once in logs)
+            admin_password = secrets.token_urlsafe(16)
+            superadmin_password = secrets.token_urlsafe(16)
+
             # 2. Create admin agent
             admin_agent = Agent(
                 name="Admin",
                 email="admin@example.com",
-                password_hash=hash_password("admin123"),
+                password_hash=hash_password(admin_password),
                 role="admin",
                 status="offline",
                 max_chats=10,
@@ -71,8 +77,8 @@ async def seed_data():
             sa_key = f"sk_{secrets.token_hex(32)}"
             superadmin_agent = Agent(
                 name="Super Admin",
-                email="superadmin@example.com",
-                password_hash=hash_password("superadmin123"),
+                email="superadmin@system.local",
+                password_hash=hash_password(superadmin_password),
                 role="superadmin",
                 status="offline",
                 max_chats=0,
@@ -108,33 +114,59 @@ async def seed_data():
             for s in default_settings:
                 db.add(s)
 
+            # 6. Sample conversation + message
+            sample_conv = Conversation(
+                id="conv-seed-001",
+                tenant_id=tenant_id,
+                channel="whatsapp",
+                customer_name="Sample User",
+                customer_phone="1234567890",
+                status="pending",
+                last_message_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+            db.add(sample_conv)
+            await db.flush()
+
+            sample_msg = Message(
+                conversation_id=sample_conv.id,
+                tenant_id=tenant_id,
+                sender_type="customer",
+                content="Hello! Is anyone available to help me with my order?",
+                content_type="text",
+            )
+            db.add(sample_msg)
+
             await db.commit()
 
             logger.info("=" * 60)
-            logger.info("  SEED DATA CREATED")
-            logger.info(f"  Tenant: default (id={tenant_id})")
-            logger.info(f"  Admin: admin@example.com / admin123")
-            logger.info(f"  Superadmin: superadmin@example.com / superadmin123")
-            logger.info(f"  API Key: {api_key}")
-            logger.info(f"  Widget Key: {widget_key}")
+            logger.info(" SEED DATA CREATED")
+            logger.info(f" Tenant: default (id={tenant_id})")
+            logger.info(f" Admin: admin@example.com / {admin_password}")
+            logger.info(f" Superadmin: superadmin@system.local / {superadmin_password}")
+            logger.info(f" API Key: {api_key}")
+            logger.info(f" Widget Key: {widget_key}")
             logger.info("=" * 60)
 
         except Exception as e:
             logger.error(f"Failed to seed data: {e}")
             await db.rollback()
+            raise e
 
 
 # ── Lifespan ──────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Safety check: reject default JWT secret in production
-    if settings.ENVIRONMENT == "production" and settings.JWT_SECRET == "change-me-in-production-use-a-long-random-string":
-        raise RuntimeError("CRITICAL: Change JWT_SECRET before running in production!")
-
-    # Database initialization
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database: All tables ensured via create_all")
+    if settings.ENVIRONMENT == "production":
+        if settings.JWT_SECRET in ("change-me-in-production-use-a-long-random-string", "", None):
+            raise RuntimeError("CRITICAL: JWT_SECRET must be set in production!")
+        # In production, use Alembic migrations only - don't auto-create tables
+        logger.info("Production mode: skipping auto table creation (use Alembic migrations)")
+    else:
+        # Development: auto-create tables for convenience
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            logger.info("Development mode: Database tables auto-created")
 
     await seed_data()
     yield
@@ -148,7 +180,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Middleware
+# ── Widget CORS — allows any origin for embeddable widget endpoints ──
+class WidgetCORSMiddleware(BaseHTTPMiddleware):
+    """Widget and webhook endpoints must be callable from any origin."""
+    OPEN_PREFIXES = ("/api/v1/widget", "/ws/widget", "/webhook")
+
+    async def dispatch(self, request: Request, call_next):
+        if any(request.url.path.startswith(p) for p in self.OPEN_PREFIXES):
+            origin = request.headers.get("origin", "*")
+            if request.method == "OPTIONS":
+                return Response(status_code=200, headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, x-api-key",
+                    "Access-Control-Max-Age": "86400",
+                })
+            response = await call_next(request)
+            response.headers["Access-Control-Allow-Origin"] = origin
+            return response
+        return await call_next(request)
+
+# Middleware (Starlette LIFO: last-added wraps outermost, so WidgetCORS must be added AFTER)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -156,6 +208,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(WidgetCORSMiddleware)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -168,6 +221,11 @@ app.include_router(widget.router)
 app.include_router(webhook.router)
 app.include_router(admin.router)
 app.include_router(superadmin.router)
+app.include_router(admin_subtenants.router)
+app.include_router(admin_contacts.router)
+app.include_router(admin_templates.router)
+app.include_router(admin_broadcasts.router)
+app.include_router(admin_groups.router)
 
 
 # ── Health Check ──────────────────────────────────────────────

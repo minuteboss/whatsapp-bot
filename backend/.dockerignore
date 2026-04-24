@@ -11,3 +11,4 @@ support.db
 *.md
 .mypy_cache
 .pytest_cache
+tests

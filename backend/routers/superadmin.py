@@ -4,14 +4,16 @@ Only accessible by agents with role='superadmin'.
 """
 
 import secrets
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from database import get_db
-from models import Tenant, Agent, Conversation
+from models import Tenant, Agent, Conversation, Package
 from models.message import Message
-from middleware.auth import require_superadmin, hash_password
+from middleware.auth import require_superadmin, hash_password, create_access_token
 
 router = APIRouter(prefix="/api/superadmin", tags=["superadmin"])
 
@@ -28,6 +30,7 @@ async def list_tenants(
     tenant_ids = [t.id for t in tenants]
     agent_counts = {}
     conv_counts = {}
+    package_names = {}
     if tenant_ids:
         for row in (await db.execute(
             select(Agent.tenant_id, func.count(Agent.id))
@@ -41,7 +44,45 @@ async def list_tenants(
             .group_by(Conversation.tenant_id)
         )).all():
             conv_counts[row[0]] = row[1]
-    return [_tenant_dict(t, agent_count=agent_counts.get(t.id, 0), conv_count=conv_counts.get(t.id, 0)) for t in tenants]
+
+    # Fetch package names for tenants that have a package assigned
+    pkg_ids = list({t.package_id for t in tenants if t.package_id})
+    if pkg_ids:
+        pkg_result = await db.execute(select(Package.id, Package.name).where(Package.id.in_(pkg_ids)))
+        for row in pkg_result.all():
+            package_names[row[0]] = row[1]
+
+    return [
+        _tenant_dict(
+            t,
+            agent_count=agent_counts.get(t.id, 0),
+            conv_count=conv_counts.get(t.id, 0),
+            package_name=package_names.get(t.package_id) if t.package_id else None,
+        )
+        for t in tenants
+    ]
+
+
+# ── Phone ID uniqueness helper ────────────────────────────────
+
+async def _validate_phone_id_unique(
+    phone_id: str, exclude_tenant_id: str | None, db: AsyncSession
+):
+    """Raise 409 if phone_id is already assigned to another active tenant."""
+    if not phone_id:
+        return
+    query = select(Tenant).where(
+        Tenant.whatsapp_company_phone_number_id == phone_id,
+        Tenant.is_active == True,
+    )
+    if exclude_tenant_id:
+        query = query.where(Tenant.id != exclude_tenant_id)
+    result = await db.execute(query)
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="This phone number ID is already assigned to another tenant",
+        )
 
 
 # ── Create tenant ──────────────────────────────────────────────
@@ -60,10 +101,14 @@ async def create_tenant(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Tenant slug already exists")
 
+    # Validate phone number ID uniqueness
+    phone_id = data.get("whatsapp_company_phone_number_id", "")
+    if phone_id:
+        await _validate_phone_id_unique(phone_id, None, db)
+
     tenant = Tenant(
         name=name,
         slug=slug,
-        plan=data.get("plan", "free"),
         max_agents=data.get("max_agents", 5),
         max_chats_per_agent=data.get("max_chats_per_agent", 10),
         whatsapp_token=data.get("whatsapp_token"),
@@ -99,10 +144,16 @@ async def update_tenant(
         if conflict.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="Slug already in use")
 
+    # Validate phone number ID uniqueness if changing
+    new_phone_id = data.get("whatsapp_company_phone_number_id")
+    if new_phone_id and new_phone_id != tenant.whatsapp_company_phone_number_id:
+        await _validate_phone_id_unique(new_phone_id, tenant.id, db)
+
     allowed = [
-        "name", "slug", "plan", "is_active", "max_agents", "max_chats_per_agent",
+        "name", "slug", "is_active", "max_agents", "max_chats_per_agent",
         "whatsapp_token", "whatsapp_company_phone_number_id",
         "whatsapp_business_account_id", "whatsapp_app_secret", "whatsapp_verify_token",
+        "billing_status", "billing_cycle",
     ]
     for key in allowed:
         if key in data:
@@ -124,10 +175,15 @@ async def delete_tenant(
     tenant = result.scalar_one_or_none()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Rename slug to free it for new tenants
+    ts = int(datetime.now().timestamp())
+    tenant.slug = f"{tenant.slug}-deleted-{ts}"
     tenant.is_active = False
+
     await db.flush()
     await db.commit()
-    return {"detail": "Tenant deactivated"}
+    return {"detail": "Tenant deactivated, slug freed"}
 
 
 # ── Rotate widget key ──────────────────────────────────────────
@@ -229,8 +285,8 @@ async def create_tenant_agent(
 
     if not name or not email or not password:
         raise HTTPException(status_code=422, detail="name, email, and password required")
-    if role not in ("agent", "admin"):
-        raise HTTPException(status_code=422, detail="role must be agent or admin")
+    if role not in ("agent", "support", "sales", "developer", "admin"):
+        raise HTTPException(status_code=422, detail="role must be agent, support, sales, developer, or admin")
 
     existing = await db.execute(select(Agent).where(Agent.email == email))
     if existing.scalar_one_or_none():
@@ -356,18 +412,26 @@ async def _get_tenant(tenant_id: str, db: AsyncSession) -> Tenant:
     return tenant
 
 
-def _tenant_dict(t: Tenant, include_keys: bool = False, agent_count: int = 0, conv_count: int = 0) -> dict:
+def _tenant_dict(t: Tenant, include_keys: bool = False, agent_count: int = 0, conv_count: int = 0, package_name: str | None = None) -> dict:
+    has_token = bool(t.whatsapp_token)
+    has_phone = bool(t.whatsapp_company_phone_number_id)
+
     d = {
         "id": t.id,
         "name": t.name,
         "slug": t.slug,
-        "plan": t.plan,
         "is_active": t.is_active,
         "max_agents": t.max_agents,
         "max_chats_per_agent": t.max_chats_per_agent,
-        "whatsapp_configured": bool(t.whatsapp_token),
+        "whatsapp_configured": has_token and has_phone,
         "whatsapp_company_phone_number_id": t.whatsapp_company_phone_number_id,
         "whatsapp_business_account_id": t.whatsapp_business_account_id,
+        "package_id": t.package_id,
+        "package_name": package_name,
+        "billing_status": t.billing_status or "trial",
+        "billing_cycle": t.billing_cycle or "monthly",
+        "trial_ends_at": t.trial_ends_at.isoformat() + "Z" if t.trial_ends_at else None,
+        "current_period_end": t.current_period_end.isoformat() + "Z" if t.current_period_end else None,
         "agent_count": agent_count,
         "conv_count": conv_count,
         "created_at": str(t.created_at) if t.created_at else None,
@@ -390,4 +454,227 @@ def _agent_dict(a: Agent) -> dict:
         "wa_connected": a.wa_connected,
         "tenant_id": a.tenant_id,
         "created_at": a.created_at.isoformat() + "Z" if a.created_at else None,
+    }
+
+
+# ── Package CRUD ───────────────────────────────────────────────
+
+def _package_dict(p: Package) -> dict:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "slug": p.slug,
+        "description": p.description,
+        "max_agents": p.max_agents,
+        "max_chats_per_agent": p.max_chats_per_agent,
+        "max_contacts": p.max_contacts,
+        "max_broadcasts_per_month": p.max_broadcasts_per_month,
+        "max_templates": p.max_templates,
+        "has_widget": p.has_widget,
+        "has_whatsapp": p.has_whatsapp,
+        "has_api_access": p.has_api_access,
+        "has_sub_tenants": p.has_sub_tenants,
+        "price_monthly": p.price_monthly,
+        "price_yearly": p.price_yearly,
+        "currency": p.currency,
+        "is_active": p.is_active,
+        "sort_order": p.sort_order,
+        "created_at": p.created_at.isoformat() + "Z" if p.created_at else None,
+    }
+
+
+@router.get("/packages")
+async def list_packages(
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Package).order_by(Package.sort_order, Package.created_at))
+    return [_package_dict(p) for p in result.scalars().all()]
+
+
+@router.post("/packages")
+async def create_package(
+    data: dict,
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    name = data.get("name", "").strip()
+    slug = data.get("slug", "").strip()
+    if not name or not slug:
+        raise HTTPException(status_code=422, detail="name and slug are required")
+
+    existing = await db.execute(select(Package).where(Package.slug == slug))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Package slug already exists")
+
+    pkg = Package(
+        name=name,
+        slug=slug,
+        description=data.get("description", ""),
+        max_agents=data.get("max_agents", 5),
+        max_chats_per_agent=data.get("max_chats_per_agent", 10),
+        max_contacts=data.get("max_contacts", 500),
+        max_broadcasts_per_month=data.get("max_broadcasts_per_month", 10),
+        max_templates=data.get("max_templates", 10),
+        has_widget=data.get("has_widget", True),
+        has_whatsapp=data.get("has_whatsapp", True),
+        has_api_access=data.get("has_api_access", False),
+        has_sub_tenants=data.get("has_sub_tenants", False),
+        price_monthly=data.get("price_monthly", 0),
+        price_yearly=data.get("price_yearly", 0),
+        currency=data.get("currency", "USD"),
+        sort_order=data.get("sort_order", 0),
+    )
+    db.add(pkg)
+    await db.flush()
+    await db.commit()
+    return _package_dict(pkg)
+
+
+@router.patch("/packages/{package_id}")
+async def update_package(
+    package_id: str,
+    data: dict,
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Package).where(Package.id == package_id))
+    pkg = result.scalar_one_or_none()
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+
+    if "slug" in data and data["slug"] != pkg.slug:
+        conflict = await db.execute(select(Package).where(Package.slug == data["slug"]))
+        if conflict.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Slug already in use")
+
+    allowed = [
+        "name", "slug", "description",
+        "max_agents", "max_chats_per_agent", "max_contacts",
+        "max_broadcasts_per_month", "max_templates",
+        "has_widget", "has_whatsapp", "has_api_access", "has_sub_tenants",
+        "price_monthly", "price_yearly", "currency",
+        "is_active", "sort_order",
+    ]
+    for key in allowed:
+        if key in data:
+            setattr(pkg, key, data[key])
+
+    await db.flush()
+    await db.commit()
+    return _package_dict(pkg)
+
+
+@router.delete("/packages/{package_id}")
+async def delete_package(
+    package_id: str,
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Package).where(Package.id == package_id))
+    pkg = result.scalar_one_or_none()
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+
+    # Check if any tenants are using this package
+    tenant_count = (await db.execute(
+        select(func.count(Tenant.id)).where(Tenant.package_id == package_id)
+    )).scalar() or 0
+    if tenant_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete: {tenant_count} tenant(s) are using this package. Reassign them first.",
+        )
+
+    await db.delete(pkg)
+    await db.flush()
+    await db.commit()
+    return {"detail": "Package deleted"}
+
+
+@router.post("/tenants/{tenant_id}/assign-package")
+async def assign_package_to_tenant(
+    tenant_id: str,
+    data: dict,
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign a package to a tenant and optionally set billing status."""
+    tenant = await _get_tenant(tenant_id, db)
+
+    package_id = data.get("package_id")
+    if package_id:
+        pkg_result = await db.execute(select(Package).where(Package.id == package_id))
+        pkg = pkg_result.scalar_one_or_none()
+        if not pkg:
+            raise HTTPException(status_code=404, detail="Package not found")
+
+        # Apply package limits to tenant
+        tenant.package_id = pkg.id
+        tenant.max_agents = pkg.max_agents
+        tenant.max_chats_per_agent = pkg.max_chats_per_agent
+    else:
+        tenant.package_id = None
+
+    if "billing_status" in data:
+        tenant.billing_status = data["billing_status"]
+    if "billing_cycle" in data:
+        tenant.billing_cycle = data["billing_cycle"]
+
+    # Handle dates
+    from datetime import datetime as dt, timezone
+    if data.get("trial_ends_at"):
+        tenant.trial_ends_at = dt.fromisoformat(data["trial_ends_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+    if data.get("current_period_end"):
+        tenant.current_period_end = dt.fromisoformat(data["current_period_end"].replace("Z", "+00:00")).replace(tzinfo=None)
+
+    await db.flush()
+    await db.commit()
+    return _tenant_dict(tenant)
+
+
+# ── Impersonation ──────────────────────────────────────────────
+@router.post("/impersonate/{agent_id}")
+async def impersonate(
+    agent_id: str,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    admin: Agent = Depends(require_superadmin),
+):
+    """Allow superadmin to log in as any agent of an active tenant."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Check if target's tenant is active
+    tenant_result = await db.execute(select(Tenant).where(Tenant.id == target.tenant_id))
+    tenant = tenant_result.scalar_one_or_none()
+    if not tenant or not tenant.is_active:
+        raise HTTPException(status_code=400, detail="Cannot impersonate agent of an inactive tenant")
+
+    token = create_access_token({"sub": target.id})
+
+    # Set httpOnly cookie
+    is_prod = settings.ENVIRONMENT == "production"
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        httponly=True,
+        secure=is_prod,
+        samesite="lax",
+        path="/",
+        max_age=settings.JWT_EXPIRY_HOURS * 3600,
+    )
+
+    return {
+        "detail": f"Impersonating {target.name}",
+        "agent_id": target.id,
+        "agent": {
+            "id": target.id,
+            "name": target.name,
+            "email": target.email,
+            "role": target.role,
+            "tenant_id": target.tenant_id,
+        }
     }

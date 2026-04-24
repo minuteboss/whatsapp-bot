@@ -41,7 +41,9 @@ async def verify_webhook(request: Request):
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
 
-    if mode == "subscribe" and token == settings.WHATSAPP_VERIFY_TOKEN:
+    # Check against global verify token (3-tier: global DB → env)
+    expected_token = wa_service._get_verify_token()
+    if mode == "subscribe" and token == expected_token:
         logger.info("Webhook verified")
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(content=challenge)
@@ -51,16 +53,44 @@ async def verify_webhook(request: Request):
 
 @router.post("/webhook")
 async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
-    """Receive Meta webhook events. Return 200 immediately — process in background."""
+    """Receive Meta webhook events. Return 200 immediately — process in background.
+
+    Signature verification is tenant-aware:
+    1. Parse body to extract phone_number_id
+    2. Resolve tenant from phone_number_id
+    3. Verify signature using the resolved tenant's app secret (falls back to global)
+    """
+    import json as _json
+
     raw_body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
 
-    if not wa_service.verify_webhook_signature(signature, raw_body):
+    try:
+        body = _json.loads(raw_body)
+    except (ValueError, _json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    # Extract phone_number_id to resolve tenant before signature verification
+    phone_number_id = _extract_phone_number_id(body)
+    tenant = None
+    if phone_number_id:
+        async with async_session() as db:
+            tenant = await _resolve_tenant_from_phone_id(phone_number_id, db)
+
+    # Verify signature using the resolved tenant's app secret
+    if not wa_service.verify_webhook_signature(signature, raw_body, tenant=tenant):
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    body = await request.json()
     background_tasks.add_task(_process_webhook, body)
     return {"status": "ok"}
+
+
+def _extract_phone_number_id(body: dict) -> str | None:
+    """Extract the phone_number_id from webhook payload metadata."""
+    try:
+        return body["entry"][0]["changes"][0]["value"]["metadata"]["phone_number_id"]
+    except (KeyError, IndexError, TypeError):
+        return None
 
 
 @router.get("/api/v1/media/{filename}")

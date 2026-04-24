@@ -247,8 +247,10 @@ async def wa_verify_code(
     result, err = await wa_service.verify_code(phone_number_id, code, tenant=tenant)
     if not result:
         raise HTTPException(status_code=400, detail=err or "Failed to verify code. Check the OTP and try again.")
-    # Mark tenant phone as registered
+    # Mark tenant phone as registered (with uniqueness check)
     if tenant.whatsapp_company_phone_number_id != phone_number_id:
+        from routers.superadmin import _validate_phone_id_unique
+        await _validate_phone_id_unique(phone_number_id, tenant.id, db)
         tenant.whatsapp_company_phone_number_id = phone_number_id
         await db.flush()
         await db.commit()
@@ -267,6 +269,10 @@ async def wa_save_phone(
     phone_number_id = (data.get("phone_number_id") or "").strip()
     if not phone_number_id:
         raise HTTPException(status_code=422, detail="phone_number_id required")
+
+    # Uniqueness check
+    from routers.superadmin import _validate_phone_id_unique
+    await _validate_phone_id_unique(phone_number_id, tenant.id, db)
 
     # Optionally verify the number exists in Meta
     info = await wa_service.get_phone_number_info(phone_number_id, tenant=tenant)
@@ -346,7 +352,6 @@ async def get_usage(
         wa_info = {"configured": False}
 
     return {
-        "plan": tenant.plan,
         "limits": {
             "max_agents": tenant.max_agents,
             "max_chats_per_agent": tenant.max_chats_per_agent,
@@ -377,11 +382,8 @@ async def get_integration(
         "widget_key": tenant.widget_api_key or "",
         "api_key": tenant.api_key or "",
         "slug": tenant.slug,
-        "snippets": {
-            "js": f'<script src="{frontend_url}/widget.js"\n  data-key="{tenant.widget_api_key or "wk_..."}"\n  data-position="bottom-right"\n  async></script>',
-            "iframe": f'<iframe\n  src="{frontend_url}/embed/{tenant.slug}?key={tenant.widget_api_key or "wk_..."}"\n  width="400" height="600"\n  frameborder="0"\n  allow="microphone">\n</iframe>',
-            "curl": f'# Create a conversation via REST API\ncurl -X POST {backend_url}/api/v1/widget/conversations \\\n  -H "x-api-key: {tenant.api_key or "sk_live_..."}" \\\n  -H "Content-Type: application/json" \\\n  -d \'{{"customer_name":"Alice","customer_email":"alice@example.com"}}\'',
-        },
+        "backend_url": backend_url,
+        "frontend_url": frontend_url,
     }
 
 

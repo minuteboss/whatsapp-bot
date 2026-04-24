@@ -6,7 +6,7 @@ export interface Agent {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'agent' | 'superadmin';
+  role: 'admin' | 'agent' | 'support' | 'sales' | 'developer' | 'superadmin';
   status: 'online' | 'away' | 'offline';
   max_chats: number;
   wa_connected: boolean;

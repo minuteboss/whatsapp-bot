@@ -32,6 +32,20 @@
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
+
+  /* WhatsApp Preview Colors */
+  --color-wa-bubble: #E7FFDB;
+  --color-wa-bg: #EFEAE2;
+  --color-wa-text: #111B21;
+  --color-wa-meta: #667781;
+
+  /* Status Colors */
+  --status-approved-bg: #ECFDF5;
+  --status-approved-text: #059669;
+  --status-pending-bg: #FFFBEB;
+  --status-pending-text: #D97706;
+  --status-rejected-bg: #FEF2F2;
+  --status-rejected-text: #DC2626;
 }
 
 * {

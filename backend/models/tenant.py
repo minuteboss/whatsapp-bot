@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 import secrets
 
-from sqlalchemy import Column, String, Boolean, Integer, DateTime
+from sqlalchemy import Column, String, Boolean, Integer, DateTime, ForeignKey
 from database import Base
 
 
@@ -17,12 +17,19 @@ class Tenant(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String(255), nullable=False)
     slug = Column(String(100), unique=True, nullable=False, index=True)
-    plan = Column(String(20), default="free")  # free / pro / enterprise
     is_active = Column(Boolean, default=True)
     max_agents = Column(Integer, default=5)
     max_chats_per_agent = Column(Integer, default=10)
+    parent_id = Column(String(36), ForeignKey("tenants.id"), nullable=True, index=True)
 
-    # ── Per-tenant WhatsApp credentials (override global env vars) ──
+    # ── Billing / Package ─────────────────────────────────────────
+    package_id = Column(String(36), ForeignKey("packages.id"), nullable=True, index=True)
+    billing_status = Column(String(20), default="trial")     # trial | active | suspended | cancelled
+    billing_cycle = Column(String(10), default="monthly")    # monthly | yearly
+    trial_ends_at = Column(DateTime, nullable=True)
+    current_period_end = Column(DateTime, nullable=True)
+
+    # ── Per-tenant WhatsApp credentials (each tenant provides their own) ──
     whatsapp_token = Column(String(512), nullable=True)
     whatsapp_company_phone_number_id = Column(String(100), nullable=True)
     whatsapp_business_account_id = Column(String(100), nullable=True)

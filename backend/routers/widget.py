@@ -6,6 +6,7 @@ Tenant resolved via widget API key (x-api-key → Tenant.widget_api_key).
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 import json
+import re
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
@@ -59,6 +60,9 @@ async def widget_config(
         "starter_greeting": s.get("starter_greeting", ""),
         "starter_fields": starter_fields,
         "offline_collect_email": s.get("offline_collect_email", "false") == "true",
+        "widget_primary_color": s.get("widget_primary_color", "#2563eb"),
+        "widget_title": s.get("widget_title", s.get("business_name", tenant.name)),
+        "widget_subtitle": s.get("widget_subtitle", "Support Chat"),
     }
 
 
@@ -78,6 +82,8 @@ async def widget_start(
     customer_name = str(fields.get("name", "Guest")).strip()[:200] or "Guest"
     customer_email = str(fields.get("email", "")).strip()[:320] or None
     customer_phone = str(fields.get("phone", "")).strip()[:50] or None
+    if customer_phone:
+        customer_phone = re.sub(r"\D", "", customer_phone)
 
     # Collect extra fields (beyond name/email/phone) as metadata JSON
     well_known = {"name", "email", "phone"}
@@ -106,7 +112,7 @@ async def widget_start(
         content_type="system_event",
     )
     db.add(welcome)
-    conv.last_message_at = datetime.now(timezone.utc).replace(tzinfo=None).replace(tzinfo=None)
+    conv.last_message_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.flush()
     await ConversationService.auto_assign(conv, db, tenant_id=tenant.id)
     await db.commit()

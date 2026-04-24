@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { superadminApi } from '@/lib/api';
+import { superadminApi, setTenantId } from '@/lib/api';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -11,15 +11,44 @@ interface Tenant {
   id: string;
   name: string;
   slug: string;
-  plan: string;
   is_active: boolean;
   max_agents: number;
   max_chats_per_agent: number;
   whatsapp_configured: boolean;
+  whatsapp_company_phone_number_id?: string;
+  whatsapp_business_account_id?: string;
   widget_api_key?: string;
   api_key?: string;
   agent_count?: number;
   conversation_count?: number;
+  package_id?: string | null;
+  package_name?: string | null;
+  billing_status?: string;
+  billing_cycle?: string;
+  trial_ends_at?: string | null;
+  current_period_end?: string | null;
+  created_at: string | null;
+}
+
+interface PkgType {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  max_agents: number;
+  max_chats_per_agent: number;
+  max_contacts: number;
+  max_broadcasts_per_month: number;
+  max_templates: number;
+  has_widget: boolean;
+  has_whatsapp: boolean;
+  has_api_access: boolean;
+  has_sub_tenants: boolean;
+  price_monthly: number;
+  price_yearly: number;
+  currency: string;
+  is_active: boolean;
+  sort_order: number;
   created_at: string | null;
 }
 
@@ -49,27 +78,16 @@ interface CrossConversation {
 
 // ── Helpers ────────────────────────────────────────────────────
 
-const planColors: Record<string, string> = {
-  free: 'var(--color-text-muted)',
-  pro: 'var(--color-primary)',
-  enterprise: '#25D366',
-};
-
 function fmt(dateStr: string | null) {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function mask(key: string | null | undefined): string {
-  if (!key) return '—';
-  return key.slice(0, 8) + '••••••••' + key.slice(-4);
 }
 
 // ── Main ───────────────────────────────────────────────────────
 
 export default function SuperAdminPage() {
   const { state } = useApp();
-  const [activeTab, setActiveTab] = useState<'tenants' | 'agents' | 'conversations'>('tenants');
+  const [activeTab, setActiveTab] = useState<'tenants' | 'agents' | 'conversations' | 'packages'>('tenants');
 
   if (!state.agent || state.agent.role !== 'superadmin') {
     return (
@@ -88,7 +106,7 @@ export default function SuperAdminPage() {
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>System-wide management across all tenants.</p>
           </div>
           <div className="flex flex-nowrap overflow-x-auto p-1" style={{ background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-sm)' }}>
-            {(['tenants', 'agents', 'conversations'] as const).map(tab => (
+            {(['tenants', 'packages', 'agents', 'conversations'] as const).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
                 className="px-4 py-2 text-sm font-semibold transition-all cursor-pointer capitalize flex-shrink-0 whitespace-nowrap"
                 style={{
@@ -104,6 +122,7 @@ export default function SuperAdminPage() {
         </header>
 
         {activeTab === 'tenants' && <TenantsTab />}
+        {activeTab === 'packages' && <PackagesTab />}
         {activeTab === 'agents' && <AgentsTab />}
         {activeTab === 'conversations' && <ConversationsTab />}
       </div>
@@ -114,18 +133,40 @@ export default function SuperAdminPage() {
 // ── TenantsTab ─────────────────────────────────────────────────
 
 function TenantsTab() {
+  const router = useRouter();
+  const { dispatch } = useApp();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editTenant, setEditTenant] = useState<Tenant | null>(null);
   const [newTenantKey, setNewTenantKey] = useState<string | null>(null);
-  const [createForm, setCreateForm] = useState({ name: '', slug: '', plan: 'free', max_agents: 5, max_chats_per_agent: 10 });
+  const [createForm, setCreateForm] = useState({ name: '', slug: '', max_agents: 5, max_chats_per_agent: 10 });
   const [createError, setCreateError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+
+  const [isSlugEdited, setIsSlugEdited] = useState(false);
+
+  const slugify = (text: string) => {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '') // remove non-alphanumeric except spaces and hyphens
+      .trim()
+      .replace(/[\s_-]+/g, '-')     // replace spaces and underscores with hyphens
+      .replace(/^-+|-+$/g, '');     // remove leading/trailing hyphens
+  };
 
   useEffect(() => {
     superadminApi.listTenants().then(setTenants).catch(console.error).finally(() => setIsLoading(false));
   }, []);
+
+  const handleImpersonate = async (agentId: string) => {
+    try {
+      const res = await superadminApi.impersonate(agentId);
+      dispatch({ type: 'SET_AGENT', agent: res.agent });
+      setTenantId(res.agent.tenant_id);
+      router.push('/dashboard');
+    } catch (err: any) { alert(err.message); }
+  };
 
   const handleToggle = async (tenant: Tenant) => {
     try {
@@ -143,7 +184,8 @@ function TenantsTab() {
       setTenants(prev => [created, ...prev]);
       setNewTenantKey(created.widget_api_key || null);
       setShowCreate(false);
-      setCreateForm({ name: '', slug: '', plan: 'free', max_agents: 5, max_chats_per_agent: 10 });
+      setCreateForm({ name: '', slug: '', max_agents: 5, max_chats_per_agent: 10 });
+      setIsSlugEdited(false);
     } catch (err: any) {
       setCreateError(err.message || 'Failed to create tenant');
     } finally {
@@ -207,7 +249,7 @@ function TenantsTab() {
           <table className="w-full border-collapse min-w-[700px]">
             <thead>
               <tr style={{ background: 'var(--color-surface-alt)' }}>
-                {['Tenant', 'Slug', 'Plan', 'Limits', 'Agents', 'WhatsApp', 'Status', ''].map(h => (
+                {['Tenant', 'Slug', 'Package', 'Limits', 'Agents', 'WhatsApp', 'Status', ''].map(h => (
                   <th key={h} className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>{h}</th>
                 ))}
               </tr>
@@ -223,7 +265,19 @@ function TenantsTab() {
                     <code className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>{tenant.slug}</code>
                   </td>
                   <td className="py-3 px-4">
-                    <span className="text-xs font-bold capitalize" style={{ color: planColors[tenant.plan] || 'var(--color-text-muted)' }}>{tenant.plan}</span>
+                    {tenant.package_name ? (
+                      <div>
+                        <span className="text-xs font-semibold" style={{ color: 'var(--color-primary)' }}>{tenant.package_name}</span>
+                        <span className={`block text-[9px] font-bold uppercase mt-0.5`} style={{
+                          color: tenant.billing_status === 'active' ? 'var(--color-accent-green)'
+                            : tenant.billing_status === 'trial' ? '#f59e0b'
+                            : tenant.billing_status === 'suspended' ? '#ef4444'
+                            : 'var(--color-text-muted)',
+                        }}>{tenant.billing_status || 'trial'}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>No package</span>
+                    )}
                   </td>
                   <td className="py-3 px-4 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {tenant.max_agents} agents / {tenant.max_chats_per_agent} chats
@@ -287,18 +341,17 @@ function TenantsTab() {
       {showCreate && (
         <SAModal title="New Tenant" onClose={() => setShowCreate(false)}>
           <form onSubmit={handleCreate} className="space-y-4">
-            <SAInput label="Company Name" value={createForm.name} onChange={v => setCreateForm(p => ({ ...p, name: v }))} required placeholder="Acme Inc." />
-            <SAInput label="Slug (URL-safe)" value={createForm.slug} onChange={v => setCreateForm(p => ({ ...p, slug: v.toLowerCase().replace(/[^a-z0-9-]/g, '') }))} required placeholder="acme" />
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Plan</label>
-              <select value={createForm.plan} onChange={e => setCreateForm(p => ({ ...p, plan: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border outline-none"
-                style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
-                <option value="free">Free</option>
-                <option value="pro">Pro</option>
-                <option value="enterprise">Enterprise</option>
-              </select>
-            </div>
+            <SAInput label="Company Name" value={createForm.name} onChange={v => {
+              setCreateForm(p => ({
+                ...p,
+                name: v,
+                slug: isSlugEdited ? p.slug : slugify(v)
+              }));
+            }} required placeholder="Acme Inc." />
+            <SAInput label="Slug (URL-safe)" value={createForm.slug} onChange={v => {
+              setCreateForm(p => ({ ...p, slug: v.toLowerCase().replace(/[^a-z0-9-]/g, '') }));
+              setIsSlugEdited(true);
+            }} required placeholder="acme" />
             <div className="grid grid-cols-2 gap-3">
               <SAInput label="Max Agents" type="number" value={String(createForm.max_agents)} onChange={v => setCreateForm(p => ({ ...p, max_agents: parseInt(v) || 1 }))} />
               <SAInput label="Max Chats/Agent" type="number" value={String(createForm.max_chats_per_agent)} onChange={v => setCreateForm(p => ({ ...p, max_chats_per_agent: parseInt(v) || 1 }))} />
@@ -316,22 +369,53 @@ function TenantsTab() {
 }
 
 function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: (t: Partial<Tenant> & { id: string }) => void; onClose: () => void }) {
+  const router = useRouter();
+  const { dispatch } = useApp();
   const [form, setForm] = useState({
-    name: tenant.name, slug: tenant.slug, plan: tenant.plan,
+    name: tenant.name, slug: tenant.slug,
     max_agents: tenant.max_agents, max_chats_per_agent: tenant.max_chats_per_agent,
     is_active: tenant.is_active,
+    whatsapp_company_phone_number_id: tenant.whatsapp_company_phone_number_id || '',
+    whatsapp_token: '',
+    whatsapp_business_account_id: tenant.whatsapp_business_account_id || '',
+    whatsapp_app_secret: '',
+    whatsapp_verify_token: '',
   });
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [rotating, setRotating] = useState<'widget' | 'api' | null>(null);
   const [newKey, setNewKey] = useState<{ label: string; value: string } | null>(null);
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+
+  const [agents, setAgents] = useState<TenantAgent[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(true);
+  const [resettingAgent, setResettingAgent] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [pwSuccess, setPwSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    superadminApi.listTenantAgents(tenant.id)
+      .then(setAgents)
+      .catch(console.error)
+      .finally(() => setLoadingAgents(false));
+  }, [tenant.id]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsSaving(true);
     try {
-      const updated = await superadminApi.updateTenant(tenant.id, form);
+      const payload: any = {
+        name: form.name, slug: form.slug,
+        max_agents: form.max_agents, max_chats_per_agent: form.max_chats_per_agent,
+        is_active: form.is_active,
+        whatsapp_company_phone_number_id: form.whatsapp_company_phone_number_id || null,
+      };
+      if (form.whatsapp_token) payload.whatsapp_token = form.whatsapp_token;
+      if (form.whatsapp_business_account_id) payload.whatsapp_business_account_id = form.whatsapp_business_account_id;
+      if (form.whatsapp_app_secret) payload.whatsapp_app_secret = form.whatsapp_app_secret;
+      if (form.whatsapp_verify_token) payload.whatsapp_verify_token = form.whatsapp_verify_token;
+      const updated = await superadminApi.updateTenant(tenant.id, payload);
       onSave({ id: tenant.id, ...updated });
     } catch (err: any) {
       setError(err.message || 'Failed to save');
@@ -358,21 +442,13 @@ function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: 
     }
   };
 
+  const toggleSecret = (key: string) => setShowSecrets(p => ({ ...p, [key]: !p[key] }));
+
   return (
     <SAModal title={`Edit — ${tenant.name}`} onClose={onClose}>
       <form onSubmit={handleSave} className="space-y-4">
         <SAInput label="Company Name" value={form.name} onChange={v => setForm(p => ({ ...p, name: v }))} required />
         <SAInput label="Slug" value={form.slug} onChange={v => setForm(p => ({ ...p, slug: v.toLowerCase().replace(/[^a-z0-9-]/g, '') }))} required />
-        <div>
-          <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Plan</label>
-          <select value={form.plan} onChange={e => setForm(p => ({ ...p, plan: e.target.value }))}
-            className="w-full px-3 py-2 text-sm border outline-none"
-            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
-            <option value="free">Free</option>
-            <option value="pro">Pro</option>
-            <option value="enterprise">Enterprise</option>
-          </select>
-        </div>
         <div className="grid grid-cols-2 gap-3">
           <SAInput label="Max Agents" type="number" value={String(form.max_agents)} onChange={v => setForm(p => ({ ...p, max_agents: parseInt(v) || 1 }))} />
           <SAInput label="Max Chats/Agent" type="number" value={String(form.max_chats_per_agent)} onChange={v => setForm(p => ({ ...p, max_chats_per_agent: parseInt(v) || 1 }))} />
@@ -385,12 +461,152 @@ function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: 
             <div className="w-5 h-5 rounded-full bg-white transition-all" style={{ transform: form.is_active ? 'translateX(20px)' : 'translateX(0)' }} />
           </button>
         </div>
+
+        {/* Agent Management Section */}
+        <div className="pt-4 space-y-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Active Agents</p>
+            {!loadingAgents && !agents.some(a => a.role === 'admin') && (
+              <button type="button" className="text-[10px] font-bold text-white px-2 py-1 rounded cursor-pointer"
+                style={{ background: 'var(--color-primary)' }}
+                onClick={async () => {
+                   const email = `admin@${tenant.slug}.com`;
+                   const name = `${tenant.name} Admin`;
+                   const pass = Math.random().toString(36).slice(-8);
+                   if (confirm(`Create a new admin agent for ${tenant.name}?\nEmail: ${email}\nPassword: ${pass}`)) {
+                     try {
+                       const created = await superadminApi.createTenantAgent(tenant.id, {
+                         name, email, password: pass, role: 'admin', max_chats: 10
+                       });
+                       setAgents(p => [...p, created]);
+                       alert("Admin created successfully!");
+                     } catch(err: any) { alert(err.message); }
+                   }
+                }}>
+                + Create Admin
+              </button>
+            )}
+          </div>
+
+          {loadingAgents ? (
+            <div className="text-[10px] animate-pulse" style={{ color: 'var(--color-text-muted)' }}>Loading agents...</div>
+          ) : (
+            <div className="space-y-2">
+              {agents.map(a => (
+                <div key={a.id} className="p-2 border" style={{ borderRadius: 'var(--radius-sm)', borderColor: 'var(--color-border-light)', background: 'var(--color-surface-alt)' }}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{a.name}</p>
+                      <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>{a.email} ({a.role})</p>
+                    </div>
+                    <div className="flex gap-2">
+                       <button type="button" className="text-[10px] font-bold underline cursor-pointer"
+                        style={{ color: 'var(--color-primary)' }}
+                        onClick={() => {
+                          if (confirm(`Login as ${a.name}? Your current session will be switched.`)) {
+                             superadminApi.impersonate(a.id).then(res => {
+                               dispatch({ type: 'SET_AGENT', agent: res.agent });
+                               setTenantId(res.agent.tenant_id);
+                               router.push('/dashboard');
+                             }).catch(err => alert(err.message));
+                          }
+                        }}>
+                        Login as
+                      </button>
+                      <button type="button" className="text-[10px] font-bold underline cursor-pointer"
+                        style={{ color: 'var(--color-text-muted)' }}
+                        onClick={() => { setResettingAgent(resettingAgent === a.id ? null : a.id); setPwSuccess(null); }}>
+                        {resettingAgent === a.id ? 'Cancel' : 'Reset'}
+                      </button>
+                    </div>
+                  </div>
+                  {resettingAgent === a.id && (
+                    <div className="mt-2 flex gap-2">
+                      <input type="password" placeholder="New password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                        className="flex-1 px-2 py-1 text-xs border outline-none"
+                        style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)' }} />
+                      <button type="button" className="px-2 py-1 text-xs font-bold text-white rounded cursor-pointer"
+                        style={{ background: 'var(--color-primary)' }}
+                        onClick={async () => {
+                          if (newPassword.length < 6) { alert('Min 6 characters'); return; }
+                          try {
+                            await superadminApi.updateTenantAgent(tenant.id, a.id, { password: newPassword });
+                            setPwSuccess(a.id);
+                            setResettingAgent(null);
+                            setNewPassword('');
+                            setTimeout(() => setPwSuccess(null), 3000);
+                          } catch (err: any) { alert(err.message); }
+                        }}>
+                        Set
+                      </button>
+                    </div>
+                  )}
+                  {pwSuccess === a.id && <p className="mt-1 text-[10px]" style={{ color: 'var(--color-accent-green)' }}>Password updated!</p>}
+                </div>
+              ))}
+              {agents.length === 0 && (
+                <p className="text-[10px] italic" style={{ color: 'var(--color-text-muted)' }}>No agents found for this tenant.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* WhatsApp Configuration */}
+        <div className="pt-4 space-y-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>WhatsApp Configuration</p>
+
+          <SAInput label="Phone Number ID" value={form.whatsapp_company_phone_number_id}
+            onChange={v => setForm(p => ({ ...p, whatsapp_company_phone_number_id: v }))}
+            placeholder="e.g. 123456789012345" />
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>WhatsApp Token</label>
+            <div className="flex gap-2">
+              <input type={showSecrets.token ? 'text' : 'password'} value={form.whatsapp_token}
+                onChange={e => setForm(p => ({ ...p, whatsapp_token: e.target.value }))}
+                className="flex-1 px-3 py-2 text-sm border outline-none font-mono"
+                style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+                placeholder="Leave blank to keep current" />
+              <button type="button" onClick={() => toggleSecret('token')} className="px-2 py-2 text-xs cursor-pointer"
+                style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                {showSecrets.token ? 'Hide' : 'Show'}
+              </button>
+            </div>
+          </div>
+
+          <SAInput label="Business Account ID" value={form.whatsapp_business_account_id}
+            onChange={v => setForm(p => ({ ...p, whatsapp_business_account_id: v }))}
+            placeholder="WABA ID" />
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>App Secret</label>
+            <div className="flex gap-2">
+              <input type={showSecrets.secret ? 'text' : 'password'} value={form.whatsapp_app_secret}
+                onChange={e => setForm(p => ({ ...p, whatsapp_app_secret: e.target.value }))}
+                className="flex-1 px-3 py-2 text-sm border outline-none font-mono"
+                style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+                placeholder="Leave blank to keep current" />
+              <button type="button" onClick={() => toggleSecret('secret')} className="px-2 py-2 text-xs cursor-pointer"
+                style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                {showSecrets.secret ? 'Hide' : 'Show'}
+              </button>
+            </div>
+          </div>
+
+          <SAInput label="Verify Token" value={form.whatsapp_verify_token}
+            onChange={v => setForm(p => ({ ...p, whatsapp_verify_token: v }))}
+            placeholder="Webhook verify token" />
+        </div>
+
         {error && <p className="text-xs" style={{ color: 'var(--color-danger)' }}>{error}</p>}
         <button type="submit" disabled={isSaving} className="w-full py-2.5 text-white text-sm font-semibold cursor-pointer"
           style={{ background: isSaving ? 'var(--color-text-muted)' : 'var(--color-primary)', borderRadius: 'var(--radius-sm)' }}>
           {isSaving ? 'Saving…' : 'Save Changes'}
         </button>
       </form>
+
+      {/* Billing & Package Assignment */}
+      <BillingSection tenant={tenant} onUpdate={(updated) => onSave({ id: tenant.id, ...updated })} />
 
       {/* Key rotation */}
       <div className="mt-6 pt-6 space-y-3" style={{ borderTop: '1px solid var(--color-border)' }}>
@@ -417,9 +633,108 @@ function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: 
   );
 }
 
+// ── BillingSection (used inside TenantEditModal) ──────────────
+
+function BillingSection({ tenant, onUpdate }: { tenant: Tenant; onUpdate: (t: any) => void }) {
+  const [packages, setPackages] = useState<PkgType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedPkg, setSelectedPkg] = useState(tenant.package_id || '');
+  const [billingStatus, setBillingStatus] = useState(tenant.billing_status || 'trial');
+  const [billingCycle, setBillingCycle] = useState(tenant.billing_cycle || 'monthly');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    superadminApi.listPackages().then(setPackages).catch(console.error).finally(() => setLoading(false));
+  }, []);
+
+  const handleAssign = async () => {
+    setSaving(true);
+    try {
+      const updated = await superadminApi.assignPackage(tenant.id, {
+        package_id: selectedPkg || null,
+        billing_status: billingStatus,
+        billing_cycle: billingCycle,
+      });
+      onUpdate(updated);
+    } catch (err: any) {
+      alert(err.message || 'Failed to assign package');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const statusColors: Record<string, string> = {
+    active: 'var(--color-accent-green)',
+    trial: '#f59e0b',
+    suspended: '#ef4444',
+    cancelled: 'var(--color-text-muted)',
+  };
+
+  if (loading) return <div className="mt-6 pt-6 animate-pulse h-20" style={{ borderTop: '1px solid var(--color-border)' }} />;
+
+  return (
+    <div className="mt-6 pt-6 space-y-4" style={{ borderTop: '1px solid var(--color-border)' }}>
+      <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Billing & Package</p>
+
+      {/* Package selector */}
+      <div>
+        <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Assigned Package</label>
+        <select value={selectedPkg} onChange={e => setSelectedPkg(e.target.value)}
+          className="w-full px-3 py-2 text-sm border outline-none cursor-pointer"
+          style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
+          <option value="">— No Package —</option>
+          {packages.filter(p => p.is_active).map(p => (
+            <option key={p.id} value={p.id}>{p.name} (${p.price_monthly}/mo)</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {/* Billing Status */}
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Billing Status</label>
+          <select value={billingStatus} onChange={e => setBillingStatus(e.target.value)}
+            className="w-full px-3 py-2 text-sm border outline-none cursor-pointer"
+            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: statusColors[billingStatus] || 'var(--color-text)' }}>
+            <option value="trial">Trial</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+
+        {/* Billing Cycle */}
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Billing Cycle</label>
+          <select value={billingCycle} onChange={e => setBillingCycle(e.target.value)}
+            className="w-full px-3 py-2 text-sm border outline-none cursor-pointer"
+            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+      </div>
+
+      <button type="button" onClick={handleAssign} disabled={saving}
+        className="w-full py-2 text-sm font-semibold cursor-pointer"
+        style={{
+          borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--color-primary)',
+          color: 'var(--color-primary)',
+          background: 'var(--color-primary-light)',
+          opacity: saving ? 0.5 : 1,
+        }}>
+        {saving ? 'Saving…' : 'Update Billing'}
+      </button>
+    </div>
+  );
+}
+
 // ── AgentsTab ──────────────────────────────────────────────────
 
 function AgentsTab() {
+  const router = useRouter();
+  const { dispatch } = useApp();
   const [tenants, setTenants] = useState<{ id: string; name: string }[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<string>('');
   const [agents, setAgents] = useState<TenantAgent[]>([]);
@@ -507,12 +822,25 @@ function AgentsTab() {
                   <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>{agent.role}</p>
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
-                  <button onClick={() => setEditAgent(agent)} className="p-1 cursor-pointer" style={{ color: 'var(--color-primary)' }}>
+                  <button onClick={() => {
+                    if (confirm(`Login as ${agent.name}?`)) {
+                      superadminApi.impersonate(agent.id).then(res => {
+                        dispatch({ type: 'SET_AGENT', agent: res.agent });
+                        setTenantId(res.agent.tenant_id);
+                        router.push('/dashboard');
+                      }).catch(err => alert(err.message));
+                    }
+                  }} className="p-1 cursor-pointer" style={{ color: 'var(--color-primary)' }} title="Login as">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3 3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                    </svg>
+                  </button>
+                  <button onClick={() => setEditAgent(agent)} className="p-1 cursor-pointer" style={{ color: 'var(--color-primary)' }} title="Edit">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
-                  <button onClick={() => handleDelete(agent.id)} className="p-1 cursor-pointer opacity-40 hover:opacity-100 transition-opacity" style={{ color: 'var(--color-danger)' }}>
+                  <button onClick={() => handleDelete(agent.id)} className="p-1 cursor-pointer opacity-40 hover:opacity-100 transition-opacity" style={{ color: 'var(--color-danger)' }} title="Delete">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
@@ -557,6 +885,9 @@ function AgentsTab() {
                 className="w-full px-3 py-2 text-sm border outline-none"
                 style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
                 <option value="agent">Agent</option>
+                <option value="support">Support</option>
+                <option value="sales">Sales</option>
+                <option value="developer">Developer</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
@@ -576,6 +907,8 @@ function AgentsTab() {
 function SAAgentEditModal({ agent, tenantId, onSave, onClose }: {
   agent: TenantAgent; tenantId: string; onSave: (a: TenantAgent) => void; onClose: () => void;
 }) {
+  const router = useRouter();
+  const { dispatch } = useApp();
   const [form, setForm] = useState({ name: agent.name, email: agent.email, role: agent.role, max_chats: agent.max_chats });
   const [newPassword, setNewPassword] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -724,7 +1057,7 @@ function ConversationsTab() {
               </tr>
             </thead>
             <tbody>
-              {conversations.map(conv => (
+              {Array.isArray(conversations) && conversations.map(conv => (
                 <tr key={conv.id} className="transition-colors" style={{ borderTop: '1px solid var(--color-border-light)' }}>
                   <td className="py-3 px-4">
                     <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{conv.customer_name || 'Unknown'}</p>
@@ -732,11 +1065,11 @@ function ConversationsTab() {
                   </td>
                   <td className="py-3 px-4">
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                      {conv.tenant_name}
+                      {conv.tenant_name || 'Unknown'}
                     </span>
                   </td>
                   <td className="py-3 px-4 text-xs capitalize" style={{ color: 'var(--color-text-secondary)' }}>
-                    {conv.channel.replace('_', ' ')}
+                    {conv.channel?.replace('_', ' ') || 'Unknown'}
                   </td>
                   <td className="py-3 px-4">
                     <span className="text-[10px] font-bold flex items-center gap-1">
@@ -761,6 +1094,240 @@ function ConversationsTab() {
             <div className="py-12 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>No conversations found.</div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── PackagesTab ────────────────────────────────────────────────
+
+function PackagesTab() {
+  const [packages, setPackages] = useState<PkgType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editPkg, setEditPkg] = useState<PkgType | null>(null);
+
+  const defaultForm = {
+    name: '', slug: '', description: '',
+    max_agents: 5, max_chats_per_agent: 10, max_contacts: 500,
+    max_broadcasts_per_month: 10, max_templates: 10,
+    has_widget: true, has_whatsapp: true, has_api_access: false, has_sub_tenants: false,
+    price_monthly: 0, price_yearly: 0, currency: 'USD', sort_order: 0,
+  };
+  const [form, setForm] = useState(defaultForm);
+  const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    superadminApi.listPackages().then(setPackages).catch(console.error).finally(() => setIsLoading(false));
+  }, []);
+
+  const slugify = (t: string) => t.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/[\s_-]+/g, '-');
+  const [isSlugEdited, setIsSlugEdited] = useState(false);
+
+  const openCreate = () => {
+    setForm(defaultForm);
+    setIsSlugEdited(false);
+    setError('');
+    setShowCreate(true);
+    setEditPkg(null);
+  };
+
+  const openEdit = (p: PkgType) => {
+    setForm({
+      name: p.name, slug: p.slug, description: p.description || '',
+      max_agents: p.max_agents, max_chats_per_agent: p.max_chats_per_agent,
+      max_contacts: p.max_contacts, max_broadcasts_per_month: p.max_broadcasts_per_month,
+      max_templates: p.max_templates,
+      has_widget: p.has_widget, has_whatsapp: p.has_whatsapp,
+      has_api_access: p.has_api_access, has_sub_tenants: p.has_sub_tenants,
+      price_monthly: p.price_monthly, price_yearly: p.price_yearly,
+      currency: p.currency, sort_order: p.sort_order,
+    });
+    setIsSlugEdited(true);
+    setError('');
+    setEditPkg(p);
+    setShowCreate(true);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsSaving(true);
+    try {
+      if (editPkg) {
+        const updated = await superadminApi.updatePackage(editPkg.id, form);
+        setPackages(prev => prev.map(p => p.id === editPkg.id ? updated : p));
+      } else {
+        const created = await superadminApi.createPackage(form);
+        setPackages(prev => [...prev, created]);
+      }
+      setShowCreate(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete package "${name}"? Tenants using it must be reassigned first.`)) return;
+    try {
+      await superadminApi.deletePackage(id);
+      setPackages(prev => prev.filter(p => p.id !== id));
+    } catch (err: any) {
+      alert(err.message || 'Cannot delete');
+    }
+  };
+
+  const featureList = (p: PkgType) => {
+    const items: string[] = [];
+    items.push(`${p.max_agents} agents`);
+    items.push(`${p.max_chats_per_agent} chats/agent`);
+    items.push(`${p.max_contacts.toLocaleString()} contacts`);
+    items.push(`${p.max_broadcasts_per_month} broadcasts/mo`);
+    items.push(`${p.max_templates} templates`);
+    if (p.has_widget) items.push('Web Widget');
+    if (p.has_whatsapp) items.push('WhatsApp');
+    if (p.has_api_access) items.push('API Access');
+    if (p.has_sub_tenants) items.push('Sub-tenants');
+    return items;
+  };
+
+  if (isLoading) return <div className="card animate-pulse h-48" />;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{packages.length} package(s)</p>
+        <button onClick={openCreate} className="px-4 py-2 text-sm font-semibold text-white cursor-pointer"
+          style={{ background: 'var(--color-primary)', borderRadius: 'var(--radius-sm)' }}>
+          + New Package
+        </button>
+      </div>
+
+      {/* Package Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        {packages.map(pkg => (
+          <div key={pkg.id} className="card p-0 overflow-hidden flex flex-col" style={{ opacity: pkg.is_active ? 1 : 0.6 }}>
+            {/* Header */}
+            <div className="p-5 pb-3" style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>{pkg.name}</h3>
+                  <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-muted)' }}>{pkg.slug}</span>
+                </div>
+                {!pkg.is_active && (
+                  <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full" style={{ background: 'var(--color-surface-alt)', color: 'var(--color-text-muted)' }}>Inactive</span>
+                )}
+              </div>
+              <div className="flex items-baseline gap-1 mt-2">
+                <span className="text-2xl font-black" style={{ color: 'var(--color-primary)' }}>
+                  {pkg.currency === 'USD' ? '$' : pkg.currency}{pkg.price_monthly.toLocaleString()}
+                </span>
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>/mo</span>
+                {pkg.price_yearly > 0 && (
+                  <span className="text-[10px] ml-2" style={{ color: 'var(--color-text-muted)' }}>
+                    ({pkg.currency === 'USD' ? '$' : pkg.currency}{pkg.price_yearly.toLocaleString()}/yr)
+                  </span>
+                )}
+              </div>
+              {pkg.description && <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{pkg.description}</p>}
+            </div>
+
+            {/* Features */}
+            <div className="flex-1 p-5 pt-3 space-y-1.5">
+              {featureList(pkg).map((feat, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="var(--color-accent-green)" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                  {feat}
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div className="px-5 py-3 flex gap-2" style={{ borderTop: '1px solid var(--color-border-light)', background: 'var(--color-bg)' }}>
+              <button onClick={() => openEdit(pkg)} className="flex-1 py-2 text-xs font-semibold cursor-pointer"
+                style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', color: 'var(--color-primary)' }}>
+                Edit
+              </button>
+              <button onClick={() => handleDelete(pkg.id, pkg.name)} className="py-2 px-3 text-xs font-semibold cursor-pointer"
+                style={{ borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}>
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {packages.length === 0 && (
+        <div className="card p-12 text-center">
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No packages yet. Create your first billing package.</p>
+        </div>
+      )}
+
+      {/* Create/Edit Modal */}
+      {showCreate && (
+        <SAModal title={editPkg ? `Edit — ${editPkg.name}` : 'New Package'} onClose={() => setShowCreate(false)}>
+          <form onSubmit={handleSave} className="space-y-4">
+            <SAInput label="Package Name" value={form.name} onChange={v => {
+              setForm(p => ({ ...p, name: v, ...(isSlugEdited ? {} : { slug: slugify(v) }) }));
+            }} required />
+            <SAInput label="Slug" value={form.slug} onChange={v => { setIsSlugEdited(true); setForm(p => ({ ...p, slug: v })); }} required />
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Description</label>
+              <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+                rows={2} className="w-full px-3 py-2 text-sm border outline-none resize-none"
+                style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }} />
+            </div>
+
+            <div className="pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--color-text-muted)' }}>Limits</p>
+              <div className="grid grid-cols-2 gap-3">
+                <SAInput label="Max Agents" type="number" value={String(form.max_agents)} onChange={v => setForm(p => ({ ...p, max_agents: parseInt(v) || 1 }))} />
+                <SAInput label="Chats / Agent" type="number" value={String(form.max_chats_per_agent)} onChange={v => setForm(p => ({ ...p, max_chats_per_agent: parseInt(v) || 1 }))} />
+                <SAInput label="Max Contacts" type="number" value={String(form.max_contacts)} onChange={v => setForm(p => ({ ...p, max_contacts: parseInt(v) || 0 }))} />
+                <SAInput label="Broadcasts / Month" type="number" value={String(form.max_broadcasts_per_month)} onChange={v => setForm(p => ({ ...p, max_broadcasts_per_month: parseInt(v) || 0 }))} />
+                <SAInput label="Max Templates" type="number" value={String(form.max_templates)} onChange={v => setForm(p => ({ ...p, max_templates: parseInt(v) || 0 }))} />
+                <SAInput label="Sort Order" type="number" value={String(form.sort_order)} onChange={v => setForm(p => ({ ...p, sort_order: parseInt(v) || 0 }))} />
+              </div>
+            </div>
+
+            <div className="pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--color-text-muted)' }}>Features</p>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { key: 'has_widget', label: 'Web Widget' },
+                  { key: 'has_whatsapp', label: 'WhatsApp' },
+                  { key: 'has_api_access', label: 'API Access' },
+                  { key: 'has_sub_tenants', label: 'Sub-tenants' },
+                ] as const).map(f => (
+                  <label key={f.key} className="flex items-center gap-2 cursor-pointer text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                    <input type="checkbox" checked={(form as any)[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.checked }))} />
+                    {f.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--color-text-muted)' }}>Pricing (Display Only)</p>
+              <div className="grid grid-cols-3 gap-3">
+                <SAInput label="Monthly" type="number" value={String(form.price_monthly)} onChange={v => setForm(p => ({ ...p, price_monthly: parseFloat(v) || 0 }))} />
+                <SAInput label="Yearly" type="number" value={String(form.price_yearly)} onChange={v => setForm(p => ({ ...p, price_yearly: parseFloat(v) || 0 }))} />
+                <SAInput label="Currency" value={form.currency} onChange={v => setForm(p => ({ ...p, currency: v.toUpperCase().slice(0, 3) }))} />
+              </div>
+            </div>
+
+            {error && <p className="text-xs" style={{ color: 'var(--color-danger)' }}>{error}</p>}
+            <button type="submit" disabled={isSaving} className="w-full py-2.5 text-white text-sm font-semibold cursor-pointer"
+              style={{ background: isSaving ? 'var(--color-text-muted)' : 'var(--color-primary)', borderRadius: 'var(--radius-sm)' }}>
+              {isSaving ? 'Saving…' : editPkg ? 'Save Changes' : 'Create Package'}
+            </button>
+          </form>
+        </SAModal>
       )}
     </div>
   );
@@ -808,6 +1375,3 @@ function SARow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-const QUALITY_COLORS: Record<string, string> = {
-  GREEN: '#22c55e', YELLOW: '#f59e0b', RED: '#ef4444',
-};

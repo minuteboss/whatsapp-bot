@@ -69,15 +69,19 @@ function appReducer(state: AppState, action: Action): AppState {
     case 'LOGOUT':
       return { ...initialState };
     case 'SET_CONVERSATIONS':
-      return { ...state, conversations: action.conversations };
+      return { 
+        ...state, 
+        conversations: Array.isArray(action.conversations) ? action.conversations : (action.conversations as any)?.items || [] 
+      };
     case 'UPDATE_CONVERSATION': {
-      const idx = state.conversations.findIndex(c => c.id === action.conversation.id);
+      const conversations = Array.isArray(state.conversations) ? state.conversations : [];
+      const idx = conversations.findIndex(c => c.id === action.conversation.id);
       if (idx >= 0) {
-        const updated = [...state.conversations];
+        const updated = [...conversations];
         updated[idx] = { ...updated[idx], ...action.conversation };
         return { ...state, conversations: updated };
       }
-      return { ...state, conversations: [action.conversation, ...state.conversations] };
+      return { ...state, conversations: [action.conversation, ...conversations] };
     }
     case 'SET_ACTIVE_CONVERSATION':
       return { ...state, activeConversationId: action.id };

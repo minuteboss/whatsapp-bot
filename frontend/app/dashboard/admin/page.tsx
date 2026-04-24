@@ -2,13 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { adminApi, agentApi, integrationApi } from '@/lib/api';
+import { adminApi, agentApi, integrationApi, subtenantApi } from '@/lib/api';
 import { Agent, CannedResponse } from '@/lib/types';
 
 // ── Types ──────────────────────────────────────────────────────
 
 interface UsageData {
-  plan: string;
   limits: { max_agents: number; max_chats_per_agent: number };
   usage: {
     agents_total: number;
@@ -24,7 +23,9 @@ interface UsageData {
 interface IntegrationData {
   widget_key: string;
   api_key: string;
-  snippets: { js: string; iframe: string; curl: string };
+  slug: string;
+  backend_url: string;
+  frontend_url: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -193,6 +194,28 @@ function SettingsTab({ settings, setSettings }: { settings: Record<string, strin
           </>
         )}
         <ToggleGroup label="Collect Email When Offline" value={settings.offline_collect_email === 'true'} onChange={() => toggle('offline_collect_email')} />
+      </div>
+
+      {/* Widget Branding */}
+      <div className="card p-8 space-y-6">
+        <SectionHeader color="#ec4899" title="Widget Branding" />
+        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          Customize the appearance of your chat widget.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <InputGroup label="Widget Title" value={settings.widget_title || settings.business_name} onChange={v => set('widget_title', v)} />
+          <InputGroup label="Widget Subtitle" value={settings.widget_subtitle || 'Support Chat'} onChange={v => set('widget_subtitle', v)} />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold uppercase tracking-wider px-1" style={{ color: 'var(--color-text-muted)' }}>Primary Color</label>
+          <div className="flex items-center gap-3">
+            <input type="color" value={settings.widget_primary_color || '#2563eb'} onChange={e => set('widget_primary_color', e.target.value)}
+              className="w-10 h-10 border-0 p-0 bg-transparent cursor-pointer" />
+            <input type="text" value={settings.widget_primary_color || '#2563eb'} onChange={e => set('widget_primary_color', e.target.value)}
+              className="flex-1 border px-4 py-2 text-sm focus:outline-none font-mono"
+              style={{ borderColor: 'var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'var(--color-text)', background: 'var(--color-surface)' }} />
+          </div>
+        </div>
       </div>
 
       <button type="submit" disabled={isSaving} className="w-full max-w-2xl py-2.5 text-white text-sm font-semibold transition-all cursor-pointer" style={{
@@ -498,6 +521,9 @@ function AgentsTab({ agents, setAgents, currentAgentId }: { agents: Agent[]; set
                 className="w-full px-3 py-2 text-sm border outline-none"
                 style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
                 <option value="agent">Agent</option>
+                <option value="support">Support</option>
+                <option value="sales">Sales</option>
+                <option value="developer">Developer</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
@@ -562,6 +588,9 @@ function AgentEditModal({ agent, onSave, onClose }: { agent: Agent; onSave: (a: 
             className="w-full px-3 py-2 text-sm border outline-none"
             style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
             <option value="agent">Agent</option>
+            <option value="support">Support</option>
+            <option value="sales">Sales</option>
+            <option value="developer">Developer</option>
             <option value="admin">Admin</option>
           </select>
         </div>
@@ -910,6 +939,15 @@ function IntegrationTab() {
       .finally(() => setIsLoading(false));
   }, []);
 
+  // Generate snippets client-side so they always reflect current keys after rotation
+  const backendUrl = data?.backend_url || 'http://localhost:8000';
+  const frontendUrl = data?.frontend_url || 'http://localhost:3000';
+  const snippets = data ? {
+    js: `<script src="${frontendUrl}/widget.js"\n  data-key="${data.widget_key}"\n  data-api-url="${backendUrl}"\n  data-position="bottom-right"\n  async></script>`,
+    iframe: `<iframe\n  src="${frontendUrl}/embed/${data.slug}?key=${data.widget_key}"\n  width="400" height="600"\n  frameborder="0"\n  allow="microphone">\n</iframe>`,
+    curl: `# Create a conversation via widget API\ncurl -X POST ${backendUrl}/api/v1/widget/conversations \\\n  -H "x-api-key: ${data.widget_key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"customer_name":"Alice","customer_email":"alice@example.com"}'`,
+  } : null;
+
   const copy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
     setCopied(key);
@@ -1059,10 +1097,10 @@ function IntegrationTab() {
                 border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)',
                 whiteSpace: 'pre-wrap', wordBreak: 'break-all',
               }}>
-                {data.snippets[embedTab]}
+                {snippets?.[embedTab]}
               </pre>
               <button
-                onClick={() => copy(data.snippets[embedTab], `embed_${embedTab}`)}
+                onClick={() => snippets && copy(snippets[embedTab], `embed_${embedTab}`)}
                 className="absolute top-2 right-2 px-2 py-1 text-xs font-semibold cursor-pointer"
                 style={{
                   borderRadius: 'var(--radius-sm)', background: 'var(--color-surface)',
@@ -1076,10 +1114,10 @@ function IntegrationTab() {
 
             {embedTab === 'js' && (
               <div className="p-3 text-xs space-y-1" style={{ background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-muted)' }}>
-                <p className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Customisation attributes:</p>
-                <p><code className="font-mono" style={{ color: 'var(--color-primary)' }}>data-position</code> — bottom-right (default), bottom-left, top-right, top-left</p>
-                <p><code className="font-mono" style={{ color: 'var(--color-primary)' }}>data-color</code> — hex color for the bubble (e.g. #1d4ed8)</p>
-                <p><code className="font-mono" style={{ color: 'var(--color-primary)' }}>data-label</code> — tooltip text on hover</p>
+                <p className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Attributes:</p>
+                <p><code className="font-mono" style={{ color: 'var(--color-primary)' }}>data-key</code> — your tenant widget API key (required)</p>
+                <p><code className="font-mono" style={{ color: 'var(--color-primary)' }}>data-api-url</code> — backend URL (defaults to {backendUrl})</p>
+                <p><code className="font-mono" style={{ color: 'var(--color-primary)' }}>data-position</code> — bottom-right (default), bottom-left</p>
               </div>
             )}
             {embedTab === 'curl' && (

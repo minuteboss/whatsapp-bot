@@ -1,6 +1,7 @@
 """
 WhatsApp Service — Meta Cloud API wrapper.
-Supports per-tenant credentials with env var fallback.
+Each tenant provides their own WhatsApp credentials.
+Default tenant falls back to .env variables for backward compatibility.
 """
 
 import hmac
@@ -24,30 +25,48 @@ class WhatsAppService:
     def __init__(self):
         self.base_url = settings.whatsapp_base_url
 
+    def _is_default_tenant(self, tenant) -> bool:
+        """Check if this is the default tenant (allowed to use .env fallback)."""
+        return tenant is not None and tenant.slug == "default"
+
     def _get_token(self, tenant=None) -> str | None:
-        """Get WhatsApp token: tenant first, then env var."""
+        """Get WhatsApp token: tenant field, or .env for default tenant only."""
         if tenant and tenant.whatsapp_token:
             return tenant.whatsapp_token
-        return settings.WHATSAPP_TOKEN
+        if self._is_default_tenant(tenant):
+            return settings.WHATSAPP_TOKEN
+        return None
 
     def _get_company_phone_id(self, tenant=None) -> str | None:
+        """Get company phone number ID from tenant."""
         if tenant and tenant.whatsapp_company_phone_number_id:
             return tenant.whatsapp_company_phone_number_id
-        return settings.WHATSAPP_COMPANY_PHONE_NUMBER_ID
+        if self._is_default_tenant(tenant):
+            return settings.WHATSAPP_COMPANY_PHONE_NUMBER_ID
+        return None
 
     def _get_waba_id(self, tenant=None) -> str | None:
+        """Get WABA ID from tenant."""
         if tenant and tenant.whatsapp_business_account_id:
             return tenant.whatsapp_business_account_id
-        return settings.WHATSAPP_BUSINESS_ACCOUNT_ID
+        if self._is_default_tenant(tenant):
+            return settings.WHATSAPP_BUSINESS_ACCOUNT_ID
+        return None
 
     def _get_app_secret(self, tenant=None) -> str | None:
+        """Get app secret from tenant."""
         if tenant and tenant.whatsapp_app_secret:
             return tenant.whatsapp_app_secret
-        return settings.WHATSAPP_APP_SECRET
+        if self._is_default_tenant(tenant):
+            return settings.WHATSAPP_APP_SECRET
+        return None
 
     def _get_verify_token(self, tenant=None) -> str:
+        """Get verify token from tenant."""
         if tenant and tenant.whatsapp_verify_token:
             return tenant.whatsapp_verify_token
+        if self._is_default_tenant(tenant):
+            return settings.WHATSAPP_VERIFY_TOKEN
         return settings.WHATSAPP_VERIFY_TOKEN
 
     def _headers(self, tenant=None) -> dict:
@@ -87,6 +106,52 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Failed to send WA message: {e}")
             return None
+
+    async def send_template_message(
+        self, phone_number_id: str, to: str, template_name: str, language: str = "en_US", components: list = None, tenant=None
+    ) -> dict | None:
+        token = self._get_token(tenant)
+        if not token:
+            return None
+
+        url = f"{self.base_url}/{phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {"code": language},
+            },
+        }
+        if components:
+            payload["template"]["components"] = components
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, json=payload, headers=self._headers(tenant), timeout=15)
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as e:
+            logger.error(f"Failed to send template message: {e}")
+            return None
+
+    async def get_templates(self, tenant=None) -> list:
+        """Fetch all message templates for the WABA."""
+        waba_id = self._get_waba_id(tenant)
+        if not waba_id:
+            return []
+        
+        url = f"{self.base_url}/{waba_id}/message_templates"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers=self._headers(tenant), timeout=20)
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("data", [])
+        except Exception as e:
+            logger.warning(f"get_templates failed: {e}")
+            return []
 
     async def get_phone_number_info(self, phone_number_id: str, tenant=None) -> dict:
         """Fetch quality rating, limit tier, and display number from Meta Graph API."""

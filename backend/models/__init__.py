@@ -7,6 +7,11 @@ from models.agent import Agent
 from models.conversation import Conversation
 from models.message import Message
 from models.setting import Setting, CannedResponse, TransferLog
+from models.contact import Contact
+from models.template import Template
+from models.broadcast import Broadcast
+from models.group import Group, contact_groups
+from models.package import Package
 
 __all__ = [
     "Tenant",
@@ -16,4 +21,11 @@ __all__ = [
     "Setting",
     "CannedResponse",
     "TransferLog",
+    "Contact",
+    "Template",
+    "Broadcast",
+    "Group",
+    "contact_groups",
+    "Package",
 ]
+

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     JWT_EXPIRY_HOURS: int = 24
 
     # ── CORS ──────────────────────────────────────────────────
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    CORS_ORIGINS: str = "*" # Allow all in dev/test, restricted in prod via .env
 
     # ── WhatsApp (Meta Cloud API) ─────────────────────────────
     WHATSAPP_TOKEN: Optional[str] = None

@@ -66,12 +66,23 @@ def create_ws_ticket(agent_id: str) -> str:
 
 
 def validate_ws_ticket(ticket: str) -> str | None:
-    """Validate a WS ticket and return agent_id, or None if invalid/expired."""
-    data = _ws_tickets.pop(ticket, None)
+    """Validate a WS ticket and return agent_id, or None if invalid/expired.
+
+    Tickets are single-use and have a 60-second TTL.
+    """
+    # Get without removing first to validate
+    data = _ws_tickets.get(ticket)
     if data is None:
         return None
+
+    # Check expiration before consuming
     if data["expires"] < datetime.now(timezone.utc):
+        # Clean up expired ticket
+        _ws_tickets.pop(ticket, None)
         return None
+
+    # Valid ticket - consume it (remove from store)
+    _ws_tickets.pop(ticket, None)
     return data["agent_id"]
 
 
