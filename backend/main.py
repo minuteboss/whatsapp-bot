@@ -6,6 +6,7 @@ Mounts all routers, CORS, rate limiting, WebSocket, seed data.
 import logging
 import secrets
 from datetime import datetime, timezone
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -153,6 +154,33 @@ async def seed_data():
             raise e
 
 
+async def auto_suspend_trials():
+    """Background task to suspend tenants whose trials have expired."""
+    while True:
+        try:
+            async with async_session() as db:
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                result = await db.execute(
+                    select(Tenant).where(
+                        Tenant.billing_status == "trial",
+                        Tenant.trial_ends_at != None,
+                        Tenant.trial_ends_at < now,
+                        Tenant.is_active == True
+                    )
+                )
+                expired_tenants = result.scalars().all()
+                for t in expired_tenants:
+                    t.billing_status = "suspended"
+                    logger.info(f"Auto-suspended tenant '{t.name}' (trial expired on {t.trial_ends_at})")
+                
+                if expired_tenants:
+                    await db.commit()
+        except Exception as e:
+            logger.error(f"Error in auto_suspend_trials: {e}")
+        
+        # Check every 6 hours
+        await asyncio.sleep(60 * 60 * 6)
+
 # ── Lifespan ──────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -169,7 +197,14 @@ async def lifespan(app: FastAPI):
             logger.info("Development mode: Database tables auto-created")
 
     await seed_data()
+    
+    from services.setting_service import global_settings
+    await global_settings.reload_cache()
+    
+    task = asyncio.create_task(auto_suspend_trials())
+    
     yield
+    task.cancel()
     await engine.dispose()
 
 
@@ -213,19 +248,24 @@ app.add_middleware(WidgetCORSMiddleware)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Mount routers
+from routers.admin_groups import router as admin_groups_router
+from routers.admin_subtenants import router as admin_subtenants_router
+from routers.superadmin import router as superadmin_router
+from routers.payments import router as payments_router
+
 app.include_router(auth.router)
-app.include_router(agents.router)
-app.include_router(conversations.router)
-app.include_router(widget.router)
 app.include_router(webhook.router)
+app.include_router(conversations.router)
+app.include_router(agents.router)
+app.include_router(widget.router)
 app.include_router(admin.router)
-app.include_router(superadmin.router)
-app.include_router(admin_subtenants.router)
 app.include_router(admin_contacts.router)
-app.include_router(admin_templates.router)
 app.include_router(admin_broadcasts.router)
-app.include_router(admin_groups.router)
+app.include_router(admin_templates.router)
+app.include_router(admin_groups_router)
+app.include_router(admin_subtenants_router)
+app.include_router(superadmin_router)
+app.include_router(payments_router)
 
 
 # ── Health Check ──────────────────────────────────────────────

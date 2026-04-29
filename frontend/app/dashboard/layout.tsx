@@ -127,7 +127,27 @@ export default function DashboardLayout({
       </div>
 
       {/* ── Main Chat Area ───────────────────────────── */}
-      <main className="flex-1 flex flex-col min-w-0 pt-12 md:pt-0 overflow-y-auto" style={{ background: 'var(--color-surface)' }}>
+      <main className="flex-1 flex flex-col min-w-0 pt-12 md:pt-0 overflow-y-auto relative" style={{ background: 'var(--color-surface)' }}>
+        {state.agent?.tenant_billing_status === 'suspended' && (
+          <div className="p-3 text-center text-sm font-bold shadow-md z-50 flex items-center justify-center gap-2" 
+               style={{ background: '#fef2f2', color: '#991b1b', borderBottom: '1px solid #fecaca' }}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            Your account is currently suspended. Please contact support to resolve billing issues.
+          </div>
+        )}
+        {state.agent && (state.agent.tenant_wallet_balance || 0) <= 0 && (
+          <div className="p-3 text-center text-sm font-bold shadow-md z-50 flex items-center justify-center gap-2" 
+               style={{ background: '#fffbeb', color: '#92400e', borderBottom: '1px solid #fef3c7' }}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            Your wallet balance is depleted. Sending messages and broadcasts is disabled. <button onClick={() => router.push('/dashboard/wallet')} className="underline ml-1">Top up now</button>
+          </div>
+        )}
+        {(state.agent?.tenant_wallet_balance || 0) > 0 && (state.agent?.tenant_wallet_balance || 0) < 500 && (
+          <div className="p-2 text-center text-xs font-semibold z-50 flex items-center justify-center gap-2" 
+               style={{ background: '#fff7ed', color: '#c2410c', borderBottom: '1px solid #ffedd5' }}>
+            Low balance warning: ${((state.agent?.tenant_wallet_balance || 0) / 100).toFixed(2)} remaining. <button onClick={() => router.push('/dashboard/wallet')} className="underline ml-1">Add funds</button>
+          </div>
+        )}
         {children}
       </main>
 

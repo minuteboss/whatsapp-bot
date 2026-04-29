@@ -11,6 +11,7 @@ from database import get_db
 from models import Contact, Agent, Tenant
 from middleware.auth import require_admin
 from middleware.tenant import get_current_tenant
+from middleware.billing import require_active_billing
 
 router = APIRouter(prefix="/api/v1/admin/contacts", tags=["admin-contacts"])
 
@@ -54,7 +55,7 @@ async def list_contacts(
 async def create_contact(
     data: dict,
     admin: Agent = Depends(require_admin),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new contact."""
@@ -62,6 +63,23 @@ async def create_contact(
     phone = data.get("phone", "").strip()
     if not name or not phone:
         raise HTTPException(status_code=422, detail="name and phone are required")
+
+    # ── Quota: max_contacts ──────────────────────────────────────
+    from models.package import Package
+    if tenant.package_id:
+        pkg = await db.get(Package, tenant.package_id)
+        if pkg:
+            current_count = (await db.execute(
+                select(func.count(Contact.id)).where(Contact.tenant_id == tenant.id)
+            )).scalar() or 0
+            if current_count >= pkg.max_contacts:
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        f"Contact limit reached ({current_count}/{pkg.max_contacts}). "
+                        "Upgrade your plan to add more contacts."
+                    ),
+                )
 
     # Clean phone: keep only digits
     phone_clean = re.sub(r"\D", "", phone)
@@ -133,17 +151,37 @@ async def delete_contact(
 async def import_contacts_csv(
     data: list[dict],
     admin: Agent = Depends(require_admin),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk import contacts from a list (CSV parsed on frontend)."""
+    # ── Quota check before importing ────────────────────────────
+    from models.package import Package
+    max_allowed = None
+    if tenant.package_id:
+        pkg = await db.get(Package, tenant.package_id)
+        if pkg:
+            current_count = (await db.execute(
+                select(func.count(Contact.id)).where(Contact.tenant_id == tenant.id)
+            )).scalar() or 0
+            max_allowed = pkg.max_contacts - current_count
+            if max_allowed <= 0:
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        f"Contact limit reached. Upgrade your plan to import more contacts."
+                    ),
+                )
+
     imported_count = 0
     for row in data:
+        if max_allowed is not None and imported_count >= max_allowed:
+            break
         name = row.get("name", "").strip() or row.get("Name", "").strip()
         phone = str(row.get("phone", "")).strip() or str(row.get("Phone", "")).strip()
         if not name or not phone:
             continue
-        
+
         phone_clean = re.sub(r"\D", "", phone)
         # Upsert logic (or just add new ones for now)
         contact = Contact(

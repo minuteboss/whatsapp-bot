@@ -206,7 +206,6 @@ class ConversationService:
                         company_phone_id,
                         conv.customer_phone,
                         resolved_msg.value,
-                        tenant=tenant,
                     )
 
         pending_count = await ConversationService._pending_count(db, conv.tenant_id)

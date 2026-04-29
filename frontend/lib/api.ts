@@ -174,6 +174,38 @@ export const superadminApi = {
     apiFetch(`/api/superadmin/packages/${id}`, { method: 'DELETE' }),
   assignPackage: (tenantId: string, data: any) =>
     apiFetch(`/api/superadmin/tenants/${tenantId}/assign-package`, { method: 'POST', body: data }),
+  getUsage: (params: Record<string, any> = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/api/superadmin/usage${qs ? `?${qs}` : ''}`);
+  },
+  getBillingSummary: (month?: string) =>
+    apiFetch(`/api/superadmin/billing-summary${month ? `?month=${month}` : ''}`),
+  listInvoices: (tenantId?: string) =>
+    apiFetch(`/api/superadmin/invoices${tenantId ? `?tenant_id=${tenantId}` : ''}`),
+  createInvoice: (data: any) =>
+    apiFetch('/api/superadmin/invoices', { method: 'POST', body: data }),
+  updateInvoice: (id: string, data: any) =>
+    apiFetch(`/api/superadmin/invoices/${id}`, { method: 'PATCH', body: data }),
+  getSettings: () =>
+    apiFetch('/api/superadmin/settings'),
+  updateSettings: (data: Record<string, any>) =>
+    apiFetch('/api/superadmin/settings', { method: 'PUT', body: data }),
+  getMetaOverview: () =>
+    apiFetch('/api/superadmin/meta-overview'),
+};
+
+// ── Wallet / Payments ───────────────────────────────────────
+export const walletApi = {
+  getTransactions: () =>
+    apiFetch('/api/v1/payments/transactions'),
+  getRates: () =>
+    apiFetch('/api/v1/payments/rates'),
+  topupMpesa: (amount: number, phone: string) =>
+    apiFetch('/api/v1/payments/topup/mpesa', { method: 'POST', body: { amount, phone } }),
+  topupPaypal: (amount: number) =>
+    apiFetch('/api/v1/payments/topup/paypal', { method: 'POST', body: { amount } }),
+  topupBank: (amount: number, reference: string) =>
+    apiFetch('/api/v1/payments/topup/bank', { method: 'POST', body: { amount, reference } }),
 };
 
 // ── Integration (admin views own tenant keys) ────────────────

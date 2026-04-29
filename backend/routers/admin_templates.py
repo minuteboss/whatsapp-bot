@@ -11,6 +11,7 @@ from database import get_db
 from models import Template, Agent, Tenant
 from middleware.auth import require_admin
 from middleware.tenant import get_current_tenant
+from middleware.billing import require_active_billing
 from services.whatsapp_service import wa_service
 
 router = APIRouter(prefix="/api/v1/admin/templates", tags=["admin-templates"])
@@ -42,16 +43,36 @@ async def list_templates(
 @router.post("/sync")
 async def sync_templates(
     admin: Agent = Depends(require_admin),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     """Sync templates from Meta and save to local storage."""
-    remote_templates = await wa_service.get_templates(tenant=tenant)
+    # ── Quota check before syncing ──────────────────────────────
+    from models.package import Package
+    max_allowed = None
+    if tenant.package_id:
+        pkg = await db.get(Package, tenant.package_id)
+        if pkg:
+            current_count = (await db.execute(
+                select(func.count(Template.id)).where(Template.tenant_id == tenant.id)
+            )).scalar() or 0
+            max_allowed = pkg.max_templates - current_count
+            if max_allowed <= 0:
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        f"Template limit reached. Upgrade your plan to sync more templates."
+                    ),
+                )
+
+    remote_templates = await wa_service.get_templates()
     if not remote_templates:
         return {"detail": "No templates found on Meta", "synced": 0}
 
     synced_count = 0
     for rt in remote_templates:
+        if max_allowed is not None and synced_count >= max_allowed:
+            break
         name = rt.get("name")
         if not name:
             continue
@@ -111,10 +132,26 @@ async def delete_template_local(
 async def create_template_local(
     data: dict,
     admin: Agent = Depends(require_admin),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     """Manually create a template locally."""
+    # ── Quota: max_templates ─────────────────────────────────
+    from models.package import Package
+    if tenant.package_id:
+        pkg = await db.get(Package, tenant.package_id)
+        if pkg:
+            current_count = (await db.execute(
+                select(func.count(Template.id)).where(Template.tenant_id == tenant.id)
+            )).scalar() or 0
+            if current_count >= pkg.max_templates:
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        f"Template limit reached ({current_count}/{pkg.max_templates}). "
+                        "Upgrade your plan to add more templates."
+                    ),
+                )
     new_template = Template(
         name=data.get("name"),
         category=data.get("category"),

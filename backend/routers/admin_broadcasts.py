@@ -12,6 +12,7 @@ from database import get_db, async_session
 from models import Broadcast, Agent, Tenant, Contact, Template
 from middleware.auth import require_admin
 from middleware.tenant import get_current_tenant
+from middleware.billing import require_active_billing
 from services.whatsapp_service import wa_service
 
 router = APIRouter(prefix="/api/v1/admin/broadcasts", tags=["admin-broadcasts"])
@@ -101,7 +102,7 @@ async def create_broadcast(
     data: dict,
     background_tasks: BackgroundTasks,
     admin: Agent = Depends(require_admin),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new broadcast and start it in the background."""
@@ -109,7 +110,33 @@ async def create_broadcast(
     template_id = data.get("template_id")
     group_id = data.get("group_id")
 
+    # ── Billing quota: max_broadcasts_per_month ───────────────────
+    from models.package import Package
+    from datetime import datetime as _dt, timezone as _tz
+    _now = _dt.now(_tz.utc).replace(tzinfo=None)
+    _month_start = _now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    broadcasts_this_month = (await db.execute(
+        select(func.count(Broadcast.id)).where(
+            Broadcast.tenant_id == tenant.id,
+            Broadcast.created_at >= _month_start,
+        )
+    )).scalar() or 0
+
+    if tenant.package_id:
+        pkg = await db.get(Package, tenant.package_id)
+        if pkg and broadcasts_this_month >= pkg.max_broadcasts_per_month:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Monthly broadcast limit reached "
+                    f"({broadcasts_this_month}/{pkg.max_broadcasts_per_month}). "
+                    "Upgrade your plan to send more."
+                ),
+            )
+
     # ── Input Validation ─────────────────────────────────────────
+
     if not name:
         raise HTTPException(status_code=422, detail="name is required")
     if len(name) > MAX_BROADCAST_NAME_LENGTH:
@@ -235,12 +262,11 @@ async def _run_broadcast(broadcast_id: str, tenant_id: str):
 
         for i, contact in enumerate(contacts):
             success = await wa_service.send_template_message(
-                phone_id, 
-                contact.phone, 
-                template.name, 
-                template.language, 
+                phone_number_id=phone_id,
+                to=contact.phone,
+                template_name=template.name,
+                language=template.language,
                 components=broadcast.components,
-                tenant=tenant
             )
 
             if success:

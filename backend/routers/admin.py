@@ -226,7 +226,7 @@ async def wa_request_code(
     method = data.get("method", "SMS").upper()
     if not phone_number_id:
         raise HTTPException(status_code=422, detail="phone_number_id required (or set WHATSAPP_COMPANY_PHONE_NUMBER_ID)")
-    success, err = await wa_service.request_verification_code(phone_number_id, method, tenant=tenant)
+    success, err = await wa_service.request_verification_code(phone_number_id, method)
     if not success:
         raise HTTPException(status_code=400, detail=err or "Failed to request code. Check WHATSAPP_TOKEN and phone_number_id.")
     return {"detail": f"Verification code sent via {method}"}
@@ -244,7 +244,7 @@ async def wa_verify_code(
     code = (data.get("code") or "").strip()
     if not phone_number_id or not code:
         raise HTTPException(status_code=422, detail="phone_number_id and code required")
-    result, err = await wa_service.verify_code(phone_number_id, code, tenant=tenant)
+    result, err = await wa_service.verify_code(phone_number_id, code)
     if not result:
         raise HTTPException(status_code=400, detail=err or "Failed to verify code. Check the OTP and try again.")
     # Mark tenant phone as registered (with uniqueness check)
@@ -275,7 +275,7 @@ async def wa_save_phone(
     await _validate_phone_id_unique(phone_number_id, tenant.id, db)
 
     # Optionally verify the number exists in Meta
-    info = await wa_service.get_phone_number_info(phone_number_id, tenant=tenant)
+    info = await wa_service.get_phone_number_info(phone_number_id)
     display_number = info.get("display_phone_number") or phone_number_id
 
     tenant.whatsapp_company_phone_number_id = phone_number_id
@@ -334,7 +334,7 @@ async def get_usage(
     wa_info = {}
     phone_id = wa_service._get_company_phone_id(tenant)
     if phone_id and wa_service._get_token(tenant):
-        raw = await wa_service.get_phone_number_info(phone_id, tenant=tenant)
+        raw = await wa_service.get_phone_number_info(phone_id)
         tier = raw.get("messaging_limit_tier", "")
         tier_limits = {
             "TIER_NOT_SET": 250, "TIER_50": 50, "TIER_250": 250,

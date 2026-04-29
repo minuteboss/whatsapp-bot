@@ -14,6 +14,7 @@ from models import Agent, Conversation, Message
 from models.tenant import Tenant
 from middleware.auth import get_current_agent
 from middleware.tenant import get_current_tenant
+from middleware.billing import require_active_billing
 from services.conversation_service import ConversationService
 from services.whatsapp_service import wa_service
 from services.websocket_manager import ws_manager
@@ -161,7 +162,7 @@ async def send_message(
     conversation_id: str,
     data: dict,
     agent: Agent = Depends(get_current_agent),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     content = data.get("content", "").strip()
@@ -190,7 +191,7 @@ async def send_message(
         try:
             if agent.wa_connected and agent.wa_phone_number_id:
                 result_wa = await wa_service.send_text_message(
-                    agent.wa_phone_number_id, conv.customer_phone, content, tenant=tenant
+                    agent.wa_phone_number_id, conv.customer_phone, content
                 )
                 if result_wa:
                     wa_sent_from = "agent_personal"
@@ -200,7 +201,7 @@ async def send_message(
                 phone_id = tenant.whatsapp_company_phone_number_id or settings.WHATSAPP_COMPANY_PHONE_NUMBER_ID
                 if phone_id:
                     result_wa = await wa_service.send_text_message(
-                        phone_id, conv.customer_phone, content, tenant=tenant
+                        phone_id, conv.customer_phone, content
                     )
                     if result_wa:
                         wa_sent_from = "company"
@@ -254,7 +255,7 @@ async def send_message(
 async def accept_conversation(
     conversation_id: str,
     agent: Agent = Depends(get_current_agent),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -283,7 +284,7 @@ async def assign_conversation(
     conversation_id: str,
     data: dict,
     agent: Agent = Depends(get_current_agent),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     target_agent_id = data.get("agent_id")
@@ -323,7 +324,7 @@ async def transfer_conversation(
     conversation_id: str,
     data: dict,
     agent: Agent = Depends(get_current_agent),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     to_agent_id = data.get("to_agent_id")
@@ -365,7 +366,7 @@ async def transfer_conversation(
 async def resolve_conversation(
     conversation_id: str,
     agent: Agent = Depends(get_current_agent),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -399,7 +400,7 @@ async def resolve_conversation(
 async def reopen_conversation(
     conversation_id: str,
     agent: Agent = Depends(get_current_agent),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_active_billing),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

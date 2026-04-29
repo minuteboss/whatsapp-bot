@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
-from models import Tenant, Agent, Conversation, Package
+from models import Tenant, Agent, Conversation, Package, WhatsAppUsage
 from models.message import Message
 from middleware.auth import require_superadmin, hash_password, create_access_token
 
@@ -116,6 +116,7 @@ async def create_tenant(
         whatsapp_business_account_id=data.get("whatsapp_business_account_id"),
         whatsapp_app_secret=data.get("whatsapp_app_secret"),
         whatsapp_verify_token=data.get("whatsapp_verify_token"),
+        wallet_balance=data.get("wallet_balance", 0),
         widget_api_key=f"wk_{secrets.token_hex(24)}",
         api_key=f"sk_live_{secrets.token_hex(32)}",
     )
@@ -153,7 +154,7 @@ async def update_tenant(
         "name", "slug", "is_active", "max_agents", "max_chats_per_agent",
         "whatsapp_token", "whatsapp_company_phone_number_id",
         "whatsapp_business_account_id", "whatsapp_app_secret", "whatsapp_verify_token",
-        "billing_status", "billing_cycle",
+        "billing_status", "billing_cycle", "wallet_balance",
     ]
     for key in allowed:
         if key in data:
@@ -633,6 +634,34 @@ async def assign_package_to_tenant(
     return _tenant_dict(tenant)
 
 
+@router.post("/trigger-auto-suspend")
+async def trigger_auto_suspend(
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger the background job that suspends expired trials."""
+    from datetime import datetime as dt, timezone as tz
+    now = dt.now(tz.utc).replace(tzinfo=None)
+    result = await db.execute(
+        select(Tenant).where(
+            Tenant.billing_status == "trial",
+            Tenant.trial_ends_at != None,
+            Tenant.trial_ends_at < now,
+            Tenant.is_active == True
+        )
+    )
+    expired = result.scalars().all()
+    count = 0
+    for t in expired:
+        t.billing_status = "suspended"
+        count += 1
+    
+    if count > 0:
+        await db.commit()
+        
+    return {"detail": f"Suspended {count} expired trials."}
+
+
 # ── Impersonation ──────────────────────────────────────────────
 @router.post("/impersonate/{agent_id}")
 async def impersonate(
@@ -678,3 +707,245 @@ async def impersonate(
             "tenant_id": target.tenant_id,
         }
     }
+# ── Usage tracking ─────────────────────────────────────────────
+@router.get("/usage")
+async def get_system_usage(
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    query = select(WhatsAppUsage, Tenant.name.label("tenant_name")).join(
+        Tenant, WhatsAppUsage.tenant_id == Tenant.id
+    )
+    if tenant_id:
+        query = query.where(WhatsAppUsage.tenant_id == tenant_id)
+    
+    query = query.order_by(WhatsAppUsage.created_at.desc()).limit(limit).offset(offset)
+    
+    rows = (await db.execute(query)).all()
+    
+    # Get counts by category
+    summary_query = select(
+        WhatsAppUsage.category, func.count(WhatsAppUsage.id)
+    ).group_by(WhatsAppUsage.category)
+    if tenant_id:
+        summary_query = summary_query.where(WhatsAppUsage.tenant_id == tenant_id)
+    
+    summary_rows = (await db.execute(summary_query)).all()
+    summary = {row[0]: row[1] for row in summary_rows}
+    
+    return {
+        "summary": summary,
+        "records": [
+            {
+                "id": u.id,
+                "tenant_id": u.tenant_id,
+                "tenant_name": tenant_name,
+                "wa_conversation_id": u.wa_conversation_id,
+                "category": u.category,
+                "pricing_model": u.pricing_model,
+                "expiration_timestamp": u.expiration_timestamp.isoformat() + "Z" if u.expiration_timestamp else None,
+                "created_at": u.created_at.isoformat() + "Z",
+            }
+            for u, tenant_name in rows
+        ]
+    }
+
+
+# ── Billing Summary & Invoices ─────────────────────────────────
+
+@router.get("/billing-summary")
+async def get_billing_summary(
+    month: str = None,  # format YYYY-MM
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate WhatsApp usage per tenant for a specific month."""
+    from datetime import datetime as dt, timezone as tz
+    import calendar
+
+    now = dt.now(tz.utc)
+    if month:
+        try:
+            y, m = map(int, month.split("-"))
+            start_date = dt(y, m, 1, tzinfo=tz.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid month format (use YYYY-MM)")
+    else:
+        start_date = dt(now.year, now.month, 1, tzinfo=tz.utc)
+
+    _, last_day = calendar.monthrange(start_date.year, start_date.month)
+    end_date = dt(start_date.year, start_date.month, last_day, 23, 59, 59, tzinfo=tz.utc)
+
+    query = (
+        select(
+            Tenant.id,
+            Tenant.name,
+            WhatsAppUsage.category,
+            func.count(WhatsAppUsage.id)
+        )
+        .join(WhatsAppUsage, Tenant.id == WhatsAppUsage.tenant_id)
+        .where(
+            WhatsAppUsage.created_at >= start_date.replace(tzinfo=None),
+            WhatsAppUsage.created_at <= end_date.replace(tzinfo=None)
+        )
+        .group_by(Tenant.id, Tenant.name, WhatsAppUsage.category)
+    )
+
+    rows = (await db.execute(query)).all()
+    
+    # Transform to per-tenant breakdown
+    summary_dict = {}
+    for t_id, t_name, category, count in rows:
+        if t_id not in summary_dict:
+            summary_dict[t_id] = {
+                "tenant_id": t_id,
+                "tenant_name": t_name,
+                "month": start_date.strftime("%Y-%m"),
+                "marketing": 0,
+                "utility": 0,
+                "service": 0,
+                "authentication": 0,
+                "unknown": 0,
+                "total": 0
+            }
+        
+        cat_key = category if category in summary_dict[t_id] else "unknown"
+        summary_dict[t_id][cat_key] += count
+        summary_dict[t_id]["total"] += count
+
+    return list(summary_dict.values())
+
+
+@router.get("/invoices")
+async def list_invoices(
+    tenant_id: str = None,
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    from models.invoice import Invoice
+    query = select(Invoice).order_by(Invoice.created_at.desc())
+    if tenant_id:
+        query = query.where(Invoice.tenant_id == tenant_id)
+        
+    result = await db.execute(query)
+    invoices = result.scalars().all()
+    return [{
+        "id": inv.id,
+        "tenant_id": inv.tenant_id,
+        "period_start": inv.period_start.isoformat() + "Z",
+        "period_end": inv.period_end.isoformat() + "Z",
+        "amount": inv.amount,
+        "currency": inv.currency,
+        "status": inv.status,
+        "notes": inv.notes,
+        "created_at": inv.created_at.isoformat() + "Z",
+    } for inv in invoices]
+
+
+@router.post("/invoices")
+async def create_invoice(
+    data: dict,
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    from models.invoice import Invoice
+    from datetime import datetime as dt
+    
+    tenant_id = data.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=422, detail="tenant_id is required")
+        
+    try:
+        start = dt.fromisoformat(data["period_start"].replace("Z", "+00:00")).replace(tzinfo=None)
+        end = dt.fromisoformat(data["period_end"].replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format")
+
+    inv = Invoice(
+        tenant_id=tenant_id,
+        period_start=start,
+        period_end=end,
+        amount=float(data.get("amount", 0)),
+        currency=data.get("currency", "USD"),
+        status=data.get("status", "draft"),
+        notes=data.get("notes", ""),
+        conversations_marketing=data.get("conversations_marketing"),
+        conversations_utility=data.get("conversations_utility"),
+        conversations_service=data.get("conversations_service"),
+        conversations_authentication=data.get("conversations_authentication"),
+        conversations_total=data.get("conversations_total"),
+    )
+    db.add(inv)
+    await db.flush()
+    await db.commit()
+    
+    return {"id": inv.id, "status": inv.status}
+
+
+@router.patch("/invoices/{invoice_id}")
+async def update_invoice(
+    invoice_id: str,
+    data: dict,
+    agent: Agent = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    from models.invoice import Invoice
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
+    inv = result.scalar_one_or_none()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+        
+    for key in ("amount", "currency", "status", "notes"):
+        if key in data:
+            setattr(inv, key, data[key])
+            
+    await db.flush()
+    await db.commit()
+    return {"id": inv.id, "status": inv.status}
+
+
+# ── Global Settings & Meta Overview ───────────────────────────
+
+@router.get("/meta-overview")
+async def get_meta_overview(
+    agent: Agent = Depends(require_superadmin),
+):
+    """Fetch WABA overview and phone numbers from Meta using global credentials."""
+    from services.whatsapp_service import wa_service
+    overview = await wa_service.get_waba_overview()
+    phone_numbers = await wa_service.get_waba_phone_numbers()
+    
+    return {
+        "overview": overview,
+        "phone_numbers": phone_numbers,
+    }
+
+
+@router.get("/settings")
+async def get_global_settings(
+    agent: Agent = Depends(require_superadmin),
+):
+    """Get all global system settings (tenant_id = null)."""
+    from services.setting_service import global_settings
+    # The cache contains all global settings
+    return global_settings._cache
+
+
+@router.put("/settings")
+async def update_global_settings(
+    data: dict,
+    agent: Agent = Depends(require_superadmin),
+):
+    """Update global system settings."""
+    from services.setting_service import global_settings
+    for key, value in data.items():
+        if isinstance(value, str):
+            await global_settings.set(key, value)
+        else:
+            # Cast non-strings to str or handle appropriately
+            await global_settings.set(key, str(value))
+    
+    return {"detail": "Global settings updated"}

@@ -76,7 +76,7 @@ export default function LoginPage() {
                 }}
                 onFocus={(e) => { e.target.style.borderColor = 'var(--color-primary)'; e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1)'; }}
                 onBlur={(e) => { e.target.style.borderColor = 'var(--color-border)'; e.target.style.boxShadow = 'none'; }}
-                placeholder="admin@example.com"
+                placeholder="email@example.com"
               />
               {errors.email && (
                 <p className="mt-1 text-xs" style={{ color: 'var(--color-danger)' }}>{errors.email.message}</p>
@@ -133,11 +133,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="pt-5 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              Default: admin@example.com / admin123
-            </p>
-          </div>
         </div>
       </div>
     </div>

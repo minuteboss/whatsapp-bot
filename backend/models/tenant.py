@@ -22,12 +22,13 @@ class Tenant(Base):
     max_chats_per_agent = Column(Integer, default=10)
     parent_id = Column(String(36), ForeignKey("tenants.id"), nullable=True, index=True)
 
-    # ── Billing / Package ─────────────────────────────────────────
+    # ── Billing / Package / Wallet ────────────────────────────────
     package_id = Column(String(36), ForeignKey("packages.id"), nullable=True, index=True)
     billing_status = Column(String(20), default="trial")     # trial | active | suspended | cancelled
     billing_cycle = Column(String(10), default="monthly")    # monthly | yearly
     trial_ends_at = Column(DateTime, nullable=True)
     current_period_end = Column(DateTime, nullable=True)
+    wallet_balance = Column(Integer, default=0) # Stored in cents/minimum currency unit to avoid float precision issues
 
     # ── Per-tenant WhatsApp credentials (each tenant provides their own) ──
     whatsapp_token = Column(String(512), nullable=True)

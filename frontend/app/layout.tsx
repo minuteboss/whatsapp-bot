@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: "Multi-agent customer support platform with WhatsApp integration",
 };
 
+import { Toaster } from "react-hot-toast";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -21,7 +23,10 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-[var(--color-bg)] text-[var(--color-text)] font-sans antialiased">
-        <AppProvider>{children}</AppProvider>
+        <AppProvider>
+          {children}
+          <Toaster position="top-right" />
+        </AppProvider>
       </body>
     </html>
   );

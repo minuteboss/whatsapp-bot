@@ -15,6 +15,8 @@ export interface Agent {
   wa_connected_at?: string | null;
   api_key?: string;
   tenant_id?: string;
+  tenant_billing_status?: string;
+  tenant_wallet_balance?: number;
   created_at?: string;
   updated_at?: string;
 }

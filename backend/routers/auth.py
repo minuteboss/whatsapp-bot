@@ -77,7 +77,16 @@ async def login(
 
 
 @router.get("/me")
-async def me(agent: Agent = Depends(get_current_agent)):
+async def me(
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db)
+):
+    # Fetch tenant to get billing status and wallet balance
+    tenant_result = await db.execute(select(Tenant.billing_status, Tenant.wallet_balance).where(Tenant.id == agent.tenant_id))
+    tenant_row = tenant_result.first()
+    billing_status = tenant_row[0] if tenant_row else "trial"
+    wallet_balance = tenant_row[1] if tenant_row else 0
+
     return {
         "id": agent.id,
         "name": agent.name,
@@ -89,6 +98,8 @@ async def me(agent: Agent = Depends(get_current_agent)):
         "wa_phone_number": agent.wa_phone_number,
         "wa_phone_number_id": agent.wa_phone_number_id,
         "tenant_id": agent.tenant_id,
+        "tenant_billing_status": billing_status,
+        "tenant_wallet_balance": wallet_balance,
     }
 
 

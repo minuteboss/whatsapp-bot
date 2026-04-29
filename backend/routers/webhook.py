@@ -21,6 +21,7 @@ from models.conversation import Conversation
 from models.message import Message
 from models.setting import Setting
 from models.tenant import Tenant
+from models.usage import WhatsAppUsage
 from services.whatsapp_service import wa_service
 from services.conversation_service import ConversationService
 from services.websocket_manager import ws_manager
@@ -77,8 +78,8 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         async with async_session() as db:
             tenant = await _resolve_tenant_from_phone_id(phone_number_id, db)
 
-    # Verify signature using the resolved tenant's app secret
-    if not wa_service.verify_webhook_signature(signature, raw_body, tenant=tenant):
+    # Verify signature using global app secret
+    if not wa_service.verify_webhook_signature(signature, raw_body):
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     background_tasks.add_task(_process_webhook, body)
@@ -166,6 +167,66 @@ async def _handle_status_update(event: dict, db: AsyncSession):
             "status": status,
         })
 
+    # Track billable conversations
+    conversation_data = event.get("conversation")
+    if conversation_data and conversation_data.get("id"):
+        wa_conv_id = conversation_data["id"]
+        phone_number_id = event.get("phone_number_id")
+        
+        tenant = await _resolve_tenant_from_phone_id(phone_number_id, db)
+        if tenant:
+            # Check if already logged (idempotency)
+            existing_usage = await db.execute(
+                select(WhatsAppUsage).where(
+                    WhatsAppUsage.wa_conversation_id == wa_conv_id,
+                    WhatsAppUsage.tenant_id == tenant.id,
+                )
+            )
+            if not existing_usage.scalar_one_or_none():
+                category = conversation_data.get("origin", {}).get("type", "unknown")
+                pricing = event.get("pricing", {})
+                
+                exp_ts = conversation_data.get("expiration_timestamp")
+                expiration = None
+                if exp_ts:
+                    expiration = datetime.fromtimestamp(int(exp_ts))
+
+                usage = WhatsAppUsage(
+                    tenant_id=tenant.id,
+                    wa_conversation_id=wa_conv_id,
+                    category=category,
+                    pricing_model=pricing.get("pricing_model"),
+                    expiration_timestamp=expiration
+                )
+                db.add(usage)
+                
+                # Fetch global pricing for this category (convert to cents)
+                from services.setting_service import global_settings
+                from models.wallet_transaction import WalletTransaction
+                
+                cat_key = f"pricing_{category.lower()}"
+                price_str = global_settings.get(cat_key, "0.0")
+                try:
+                    price_cents = int(float(price_str) * 100)
+                except ValueError:
+                    price_cents = 0
+                    
+                if price_cents > 0:
+                    tenant.wallet_balance -= price_cents
+                    tx = WalletTransaction(
+                        tenant_id=tenant.id,
+                        amount=price_cents,
+                        type="deduction",
+                        method="whatsapp_usage",
+                        reference=wa_conv_id,
+                        status="completed",
+                        description=f"WhatsApp {category.capitalize()} Conversation"
+                    )
+                    db.add(tx)
+                
+                await db.flush()
+                logger.info(f"Logged billable conversation {wa_conv_id} ({category}) for tenant {tenant.slug}. Deducted {price_cents} cents.")
+
 
 async def _handle_incoming_message(event: dict, db: AsyncSession):
     """Handle an incoming message — either from a customer or agent's personal WA."""
@@ -194,7 +255,7 @@ async def _handle_incoming_message(event: dict, db: AsyncSession):
     media_url = None
     if media_id:
         try:
-            file_bytes, mime_type = await wa_service.download_media(media_id, tenant=tenant)
+            file_bytes, mime_type = await wa_service.download_media(media_id)
             if file_bytes:
                 ext = mime_type.split("/")[-1].split(";")[0] if mime_type else "bin"
                 filename = f"{uuid.uuid4().hex}.{ext}"
@@ -259,7 +320,7 @@ async def _handle_incoming_message(event: dict, db: AsyncSession):
                 away_setting = away.scalar_one_or_none()
                 if away_setting and company_phone_id:
                     await wa_service.send_text_message(
-                        company_phone_id, sender_phone, away_setting.value, tenant=tenant
+                        company_phone_id, sender_phone, away_setting.value
                     )
             else:
                 welcome = await db.execute(
@@ -268,7 +329,7 @@ async def _handle_incoming_message(event: dict, db: AsyncSession):
                 welcome_setting = welcome.scalar_one_or_none()
                 if welcome_setting and company_phone_id:
                     await wa_service.send_text_message(
-                        company_phone_id, sender_phone, welcome_setting.value, tenant=tenant
+                        company_phone_id, sender_phone, welcome_setting.value
                     )
 
         await ws_manager.broadcast_all({
@@ -298,7 +359,7 @@ async def _handle_incoming_message(event: dict, db: AsyncSession):
     # Mark as read
     company_phone_id = wa_service._get_company_phone_id(tenant)
     if company_phone_id:
-        await wa_service.mark_as_read(company_phone_id, wa_message_id, tenant=tenant)
+        await wa_service.mark_as_read(company_phone_id, wa_message_id)
 
     await ws_manager.broadcast_all({
         "type": "message:new",

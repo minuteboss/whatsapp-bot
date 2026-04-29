@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { superadminApi, setTenantId } from '@/lib/api';
+import SettingsTab from './SettingsTab';
+import MetaOverviewTab from './MetaOverviewTab';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ interface Tenant {
   billing_cycle?: string;
   trial_ends_at?: string | null;
   current_period_end?: string | null;
+  wallet_balance?: number;
   created_at: string | null;
 }
 
@@ -76,6 +79,30 @@ interface CrossConversation {
   created_at: string;
 }
 
+interface UsageRecord {
+  id: string;
+  tenant_id: string;
+  tenant_name: string;
+  wa_conversation_id: string;
+  category: string;
+  pricing_model: string | null;
+  expiration_timestamp: string | null;
+  created_at: string;
+}
+
+interface UsageSummary {
+  marketing?: number;
+  utility?: number;
+  service?: number;
+  authentication?: number;
+  [key: string]: number | undefined;
+}
+
+interface UsageData {
+  summary: UsageSummary;
+  records: UsageRecord[];
+}
+
 // ── Helpers ────────────────────────────────────────────────────
 
 function fmt(dateStr: string | null) {
@@ -87,7 +114,7 @@ function fmt(dateStr: string | null) {
 
 export default function SuperAdminPage() {
   const { state } = useApp();
-  const [activeTab, setActiveTab] = useState<'tenants' | 'agents' | 'conversations' | 'packages'>('tenants');
+  const [activeTab, setActiveTab] = useState<'tenants' | 'agents' | 'conversations' | 'packages' | 'usage' | 'invoices' | 'meta' | 'settings'>('tenants');
 
   if (!state.agent || state.agent.role !== 'superadmin') {
     return (
@@ -106,7 +133,7 @@ export default function SuperAdminPage() {
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>System-wide management across all tenants.</p>
           </div>
           <div className="flex flex-nowrap overflow-x-auto p-1" style={{ background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-sm)' }}>
-            {(['tenants', 'packages', 'agents', 'conversations'] as const).map(tab => (
+            {(['tenants', 'packages', 'agents', 'conversations', 'usage', 'invoices', 'meta', 'settings'] as const).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
                 className="px-4 py-2 text-sm font-semibold transition-all cursor-pointer capitalize flex-shrink-0 whitespace-nowrap"
                 style={{
@@ -125,6 +152,10 @@ export default function SuperAdminPage() {
         {activeTab === 'packages' && <PackagesTab />}
         {activeTab === 'agents' && <AgentsTab />}
         {activeTab === 'conversations' && <ConversationsTab />}
+        {activeTab === 'usage' && <UsageTab />}
+        {activeTab === 'invoices' && <InvoicesTab />}
+        {activeTab === 'meta' && <MetaOverviewTab />}
+        {activeTab === 'settings' && <SettingsTab />}
       </div>
     </div>
   );
@@ -249,7 +280,7 @@ function TenantsTab() {
           <table className="w-full border-collapse min-w-[700px]">
             <thead>
               <tr style={{ background: 'var(--color-surface-alt)' }}>
-                {['Tenant', 'Slug', 'Package', 'Limits', 'Agents', 'WhatsApp', 'Status', ''].map(h => (
+                {['Tenant', 'Slug', 'Package', 'Limits', 'Balance', 'WhatsApp', 'Status', ''].map(h => (
                   <th key={h} className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>{h}</th>
                 ))}
               </tr>
@@ -282,8 +313,8 @@ function TenantsTab() {
                   <td className="py-3 px-4 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {tenant.max_agents} agents / {tenant.max_chats_per_agent} chats
                   </td>
-                  <td className="py-3 px-4 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    {tenant.agent_count ?? '—'}
+                  <td className="py-3 px-4 text-xs font-black" style={{ color: (tenant.wallet_balance || 0) <= 0 ? 'var(--color-danger)' : 'var(--color-text)' }}>
+                    ${((tenant.wallet_balance || 0) / 100).toFixed(2)}
                   </td>
                   <td className="py-3 px-4">
                     <span className="text-[10px] font-bold" style={{ color: tenant.whatsapp_configured ? '#25D366' : 'var(--color-text-muted)' }}>
@@ -380,6 +411,7 @@ function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: 
     whatsapp_business_account_id: tenant.whatsapp_business_account_id || '',
     whatsapp_app_secret: '',
     whatsapp_verify_token: '',
+    wallet_balance: tenant.wallet_balance || 0,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -415,6 +447,7 @@ function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: 
       if (form.whatsapp_business_account_id) payload.whatsapp_business_account_id = form.whatsapp_business_account_id;
       if (form.whatsapp_app_secret) payload.whatsapp_app_secret = form.whatsapp_app_secret;
       if (form.whatsapp_verify_token) payload.whatsapp_verify_token = form.whatsapp_verify_token;
+      payload.wallet_balance = form.wallet_balance;
       const updated = await superadminApi.updateTenant(tenant.id, payload);
       onSave({ id: tenant.id, ...updated });
     } catch (err: any) {
@@ -452,6 +485,25 @@ function TenantEditModal({ tenant, onSave, onClose }: { tenant: Tenant; onSave: 
         <div className="grid grid-cols-2 gap-3">
           <SAInput label="Max Agents" type="number" value={String(form.max_agents)} onChange={v => setForm(p => ({ ...p, max_agents: parseInt(v) || 1 }))} />
           <SAInput label="Max Chats/Agent" type="number" value={String(form.max_chats_per_agent)} onChange={v => setForm(p => ({ ...p, max_chats_per_agent: parseInt(v) || 1 }))} />
+        </div>
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Wallet Balance (USD)</label>
+           <div className="relative">
+             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+             <input 
+               type="number" 
+               step="0.01"
+               value={(form.wallet_balance / 100).toFixed(2)}
+               onChange={e => {
+                 const val = parseFloat(e.target.value);
+                 if (!isNaN(val)) {
+                   setForm(p => ({ ...p, wallet_balance: Math.round(val * 100) }));
+                 }
+               }}
+               className="w-full pl-7 pr-3 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-700 text-sm"
+             />
+           </div>
+           <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold tracking-tight">Stored as {form.wallet_balance} cents</p>
         </div>
         <div className="flex items-center justify-between p-1">
           <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Active</label>
@@ -641,6 +693,8 @@ function BillingSection({ tenant, onUpdate }: { tenant: Tenant; onUpdate: (t: an
   const [selectedPkg, setSelectedPkg] = useState(tenant.package_id || '');
   const [billingStatus, setBillingStatus] = useState(tenant.billing_status || 'trial');
   const [billingCycle, setBillingCycle] = useState(tenant.billing_cycle || 'monthly');
+  const [trialEndsAt, setTrialEndsAt] = useState(tenant.trial_ends_at ? tenant.trial_ends_at.slice(0, 16) : '');
+  const [periodEnd, setPeriodEnd] = useState(tenant.current_period_end ? tenant.current_period_end.slice(0, 16) : '');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -650,11 +704,15 @@ function BillingSection({ tenant, onUpdate }: { tenant: Tenant; onUpdate: (t: an
   const handleAssign = async () => {
     setSaving(true);
     try {
-      const updated = await superadminApi.assignPackage(tenant.id, {
+      const payload: any = {
         package_id: selectedPkg || null,
         billing_status: billingStatus,
         billing_cycle: billingCycle,
-      });
+      };
+      if (trialEndsAt) payload.trial_ends_at = new Date(trialEndsAt).toISOString();
+      if (periodEnd) payload.current_period_end = new Date(periodEnd).toISOString();
+
+      const updated = await superadminApi.assignPackage(tenant.id, payload);
       onUpdate(updated);
     } catch (err: any) {
       alert(err.message || 'Failed to assign package');
@@ -712,6 +770,22 @@ function BillingSection({ tenant, onUpdate }: { tenant: Tenant; onUpdate: (t: an
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
           </select>
+        </div>
+        
+        {/* Trial Ends At */}
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Trial Ends At</label>
+          <input type="datetime-local" value={trialEndsAt} onChange={e => setTrialEndsAt(e.target.value)}
+            className="w-full px-3 py-2 text-sm border outline-none"
+            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }} />
+        </div>
+
+        {/* Current Period End */}
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Current Period End</label>
+          <input type="datetime-local" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)}
+            className="w-full px-3 py-2 text-sm border outline-none"
+            style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }} />
         </div>
       </div>
 
@@ -1335,6 +1409,125 @@ function PackagesTab() {
 
 // ── Shared helpers ─────────────────────────────────────────────
 
+
+// ── UsageTab ───────────────────────────────────────────────────
+
+function UsageTab() {
+  const [data, setData] = useState<UsageData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [tenantId, setTenantIdFilter] = useState('');
+  const [tenants, setTenants] = useState<{id: string, name: string}[]>([]);
+
+  useEffect(() => {
+    superadminApi.listTenants().then(ts => setTenants(ts.map((t:any) => ({id: t.id, name: t.name}))));
+  }, []);
+
+  useEffect(() => {
+    setIsLoading(true);
+    superadminApi.getUsage({ tenant_id: tenantId || undefined })
+      .then(setData)
+      .catch(console.error)
+      .finally(() => setIsLoading(false));
+  }, [tenantId]);
+
+  const total = Object.values(data?.summary || {}).reduce((a, b) => (a || 0) + (b || 0), 0) || 0;
+
+  const categoryColors: Record<string, string> = {
+    marketing: '#3b82f6',
+    utility: '#10b981',
+    authentication: '#f59e0b',
+    service: '#25D366',
+    unknown: 'var(--color-text-muted)',
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+         <div className="max-w-xs w-full">
+            <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>Filter by Tenant</label>
+            <select value={tenantId} onChange={e => setTenantIdFilter(e.target.value)}
+              className="w-full px-3 py-2 text-sm border outline-none"
+              style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
+              <option value="">All Tenants</option>
+              {tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+         </div>
+         <div className="flex items-center gap-4">
+            <div className="text-right">
+               <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Total Billable Conversations</p>
+               <p className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>{total.toLocaleString()}</p>
+            </div>
+         </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {['marketing', 'utility', 'authentication', 'service'].map(cat => (
+          <div key={cat} className="card p-4 space-y-1">
+            <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>{cat}</p>
+            <p className="text-xl font-bold" style={{ color: categoryColors[cat] }}>
+               {data?.summary[cat]?.toLocaleString() || 0}
+            </p>
+            <div className="h-1 rounded-full w-full" style={{ background: 'var(--color-surface-alt)' }}>
+               <div className="h-full rounded-full" style={{ 
+                 background: categoryColors[cat], 
+                 width: `${total > 0 ? ((data?.summary[cat] || 0) / total) * 100 : 0}%` 
+               }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Records Table */}
+      <div className="card overflow-hidden overflow-x-auto">
+        <table className="w-full border-collapse min-w-[800px]">
+          <thead>
+            <tr style={{ background: 'var(--color-surface-alt)' }}>
+              {['Date', 'Tenant', 'Conversation ID', 'Category', 'Pricing', 'Expires'].map(h => (
+                <th key={h} className="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+               <tr><td colSpan={6} className="py-12 text-center text-xs animate-pulse">Loading usage records...</td></tr>
+            ) : data?.records.map(record => (
+              <tr key={record.id} style={{ borderTop: '1px solid var(--color-border-light)' }}>
+                <td className="py-3 px-4">
+                   <p className="text-xs font-medium" style={{ color: 'var(--color-text)' }}>{new Date(record.created_at).toLocaleString()}</p>
+                </td>
+                <td className="py-3 px-4 text-xs font-semibold" style={{ color: 'var(--color-primary)' }}>
+                   {record.tenant_name}
+                </td>
+                <td className="py-3 px-4">
+                   <code className="text-[10px] font-mono" style={{ color: 'var(--color-text-muted)' }}>{record.wa_conversation_id}</code>
+                </td>
+                <td className="py-3 px-4">
+                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full capitalize" style={{
+                      background: `${categoryColors[record.category]}15`,
+                      color: categoryColors[record.category]
+                   }}>
+                      {record.category}
+                   </span>
+                </td>
+                <td className="py-3 px-4 text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                   {record.pricing_model || '—'}
+                </td>
+                <td className="py-3 px-4 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                   {record.expiration_timestamp ? new Date(record.expiration_timestamp).toLocaleString() : '—'}
+                </td>
+              </tr>
+            ))}
+            {!isLoading && data?.records.length === 0 && (
+              <tr><td colSpan={6} className="py-12 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>No usage records found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function SAModal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
@@ -1375,3 +1568,135 @@ function SARow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+// ── InvoicesTab ────────────────────────────────────────────────
+
+function InvoicesTab() {
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [month, setMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [invs, sum] = await Promise.all([
+        superadminApi.listInvoices(),
+        superadminApi.getBillingSummary(month)
+      ]);
+      setInvoices(invs);
+      setSummary(sum);
+    } catch (e: any) {
+      alert("Failed to load billing info: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [month]);
+
+  const handleGenerateInvoice = async (tenantId: string, item: any) => {
+    try {
+      const start = new Date(month + '-01');
+      const end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59);
+      
+      const payload = {
+        tenant_id: tenantId,
+        period_start: start.toISOString(),
+        period_end: end.toISOString(),
+        amount: 0, // Should be computed based on pkg rules
+        currency: 'USD',
+        status: 'draft',
+        conversations_marketing: item.marketing,
+        conversations_utility: item.utility,
+        conversations_service: item.service,
+        conversations_authentication: item.authentication,
+        conversations_total: item.total
+      };
+      
+      await superadminApi.createInvoice(payload);
+      alert('Draft invoice created!');
+      fetchData();
+    } catch(e:any) {
+      alert(e.message);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <label className="text-sm font-bold uppercase" style={{ color: 'var(--color-text-muted)' }}>Month</label>
+        <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+          className="px-3 py-2 text-sm border outline-none"
+          style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }} />
+      </div>
+
+      {loading ? (
+        <div className="h-40 animate-pulse bg-gray-200 rounded"></div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="card p-5">
+            <h3 className="font-bold mb-4" style={{ color: 'var(--color-text)' }}>Billing Summary ({month})</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr style={{ color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border-light)' }}>
+                    <th className="pb-2">Tenant</th>
+                    <th className="pb-2">Marketing</th>
+                    <th className="pb-2">Utility</th>
+                    <th className="pb-2">Service</th>
+                    <th className="pb-2">Total</th>
+                    <th className="pb-2 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.map((s, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+                      <td className="py-2">{s.tenant_name}</td>
+                      <td className="py-2">{s.marketing}</td>
+                      <td className="py-2">{s.utility}</td>
+                      <td className="py-2">{s.service}</td>
+                      <td className="py-2 font-bold">{s.total}</td>
+                      <td className="py-2 text-right">
+                        <button onClick={() => handleGenerateInvoice(s.tenant_id, s)}
+                          className="text-xs font-bold px-2 py-1 rounded cursor-pointer"
+                          style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>Draft Invoice</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {summary.length === 0 && (
+                    <tr><td colSpan={6} className="py-4 text-center italic text-xs">No usage recorded</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <h3 className="font-bold mb-4" style={{ color: 'var(--color-text)' }}>Recent Invoices</h3>
+            <div className="space-y-2">
+              {invoices.map(inv => (
+                <div key={inv.id} className="p-3 border rounded text-sm flex justify-between items-center" style={{ borderColor: 'var(--color-border-light)' }}>
+                  <div>
+                    <p className="font-bold" style={{ color: 'var(--color-text)' }}>{inv.tenant_id.substring(0,8)}... - {inv.amount} {inv.currency}</p>
+                    <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{new Date(inv.period_start).toLocaleDateString()} to {new Date(inv.period_end).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <span className="px-2 py-1 text-[10px] font-bold uppercase rounded" style={{ background: 'var(--color-surface-alt)' }}>{inv.status}</span>
+                  </div>
+                </div>
+              ))}
+              {invoices.length === 0 && (
+                <p className="text-sm italic" style={{ color: 'var(--color-text-muted)' }}>No invoices generated yet.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

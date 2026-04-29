@@ -12,6 +12,9 @@ from models.template import Template
 from models.broadcast import Broadcast
 from models.group import Group, contact_groups
 from models.package import Package
+from models.usage import WhatsAppUsage
+from models.invoice import Invoice
+from models.wallet_transaction import WalletTransaction
 
 __all__ = [
     "Tenant",
@@ -27,5 +30,7 @@ __all__ = [
     "Group",
     "contact_groups",
     "Package",
+    "WhatsAppUsage",
+    "Invoice",
+    "WalletTransaction",
 ]
-
